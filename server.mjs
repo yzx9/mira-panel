@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 
 import { getUsage, toDom } from './usage.mjs';
+import { getTasks, tasksSignature, tasksTexts } from './vikunja.mjs';
 import { renderPage } from './render.mjs';
 
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -38,7 +39,7 @@ const BUILD = await computeBuild();
 async function computeBuild() {
   const here = dirname(fileURLToPath(import.meta.url));
   const parts = await Promise.all(
-    ['server.mjs', 'usage.mjs', 'render.mjs'].map(async (name) => {
+    ['server.mjs', 'usage.mjs', 'render.mjs', 'vikunja.mjs'].map(async (name) => {
       const info = await stat(join(here, name));
       return `${name}:${info.size}:${Math.round(info.mtimeMs)}`;
     }),
@@ -83,6 +84,51 @@ function sendJson(res, req, payload) {
   });
 }
 
+/** Structural GLM bits that cannot be patched as text -> part of the page signature. */
+function glmSignature(glm) {
+  return createHash('sha1')
+    .update(
+      JSON.stringify({
+        level: glm.level,
+        fiveHour: Boolean(glm.fiveHour),
+        weekly: Boolean(glm.weekly),
+        mcp: glm.mcp?.details?.map((d) => d.name) ?? null,
+        models: glm.usage?.models?.map((m) => m.name) ?? null,
+        hours: glm.usage?.hourlyTokens?.length ?? 0,
+      }),
+    )
+    .digest('hex')
+    .slice(0, 8);
+}
+
+/** Everything the page (and its 60s poll) needs, for one tab. */
+async function stateFor(tab) {
+  const [glm, tasks] = await Promise.all([getUsage(), getTasks()]);
+  const glmDom = toDom(glm);
+  const tasksDom = { texts: tasksTexts(tasks) };
+  const vikunja = tab === 'vikunja';
+
+  const texts = { ...glmDom.texts, ...tasksDom.texts };
+  texts['fetched-at'] = vikunja ? tasks.fetchedAt : glm.fetchedAt;
+  texts['health-mark'] = vikunja ? (tasks.ok ? '正常' : '⚠ 数据陈旧') : glmDom.texts['health-mark'];
+  texts['head-count'] = String(tasks.counts?.open ?? '—');
+
+  const active = vikunja ? tasks : glm;
+  return {
+    tab,
+    build: BUILD,
+    signature: vikunja ? `${BUILD}:v:${tasksSignature(tasks)}` : `${BUILD}:g:${glmSignature(glm)}`,
+    texts,
+    bars: glmDom.bars,
+    stale: Boolean(active.stale),
+    error: active.error ?? null,
+    glm,
+    tasks,
+    glmDom,
+    tasksDom,
+  };
+}
+
 const server = createServer(async (req, res) => {
   const path = (req.url ?? '/').split('?')[0];
 
@@ -96,20 +142,35 @@ const server = createServer(async (req, res) => {
       return send(res, 200, 'ok\n', { 'Content-Type': 'text/plain' });
     }
 
-    // The panel: fetch usage (25s cache), render the whole page server-side.
-    if (path === '/' || path === '/index.html') {
-      const data = await getUsage();
-      const html = renderPage(data, toDom(data), BUILD);
+    // Panel pages: one tab = one URL = one SSR pass. No client-side routing,
+    // so a tab switch is a normal navigation the e-paper repaints anyway.
+    if (path === '/' || path === '/glm' || path === '/index.html' || path === '/vikunja') {
+      const state = await stateFor(path === '/vikunja' ? 'vikunja' : 'glm');
+      const html = renderPage(state);
       return send(res, 200, req.method === 'HEAD' ? '' : html, {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Length': Buffer.byteLength(html),
       });
     }
 
-    // What the 60s client updater patches text nodes from.
-    if (path === '/api/usage') {
-      const data = await getUsage();
-      return sendJson(res, req, { ...toDom(data), build: BUILD, data });
+    // What the 60s client poll patches text nodes from (kept lean on purpose).
+    if (path === '/api/state' || path === '/api/usage') {
+      const tab = new URL(req.url, 'http://localhost').searchParams.get('tab') === 'vikunja' ? 'vikunja' : 'glm';
+      const state = await stateFor(tab);
+      return sendJson(res, req, {
+        build: state.build,
+        signature: state.signature,
+        texts: state.texts,
+        bars: state.bars,
+        stale: state.stale,
+        error: state.error,
+      });
+    }
+
+    // Debug view: full normalised payload for both sources.
+    if (path === '/api/raw') {
+      const state = await stateFor('glm');
+      return sendJson(res, req, { glm: state.glm, tasks: state.tasks });
     }
 
     const file = resolvePath(path);

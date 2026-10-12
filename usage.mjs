@@ -183,6 +183,9 @@ function normaliseUsage(modelData, toolData) {
     tokens: totals.totalTokensUsage ?? hourTokens.reduce((a, b) => a + b, 0),
     models: summary.slice(0, 3).map((m) => ({ name: m.modelName, tokens: m.totalTokens })),
     hours: hourTokens.length,
+    // Per-hour series for the sparkline card ("HH:00" labels).
+    hourlyTokens: hourTokens,
+    hourlyLabels: (modelData?.x_time ?? []).map((s) => String(s).slice(11, 16)),
     tools,
   };
 }
@@ -241,6 +244,10 @@ export function toDom(data) {
     'fetched-at': data.fetchedAt,
     level: data.level || '—',
     'health-mark': data.ok ? '正常' : '⚠ 数据陈旧',
+    // Tab-rail preview: 5-hour quota only, nothing else belongs in the rail.
+    'p-glm-used': '—',
+    'p-glm-remain': '—',
+    'p-glm-reset': '—',
   };
   const bars = {};
 
@@ -250,6 +257,9 @@ export function toDom(data) {
     texts['fh-reset-in'] = data.fiveHour.resetIn ? `${data.fiveHour.resetIn} 后重置` : '重置时间未知';
     texts['fh-reset-at'] = data.fiveHour.resetAt;
     bars['fh-bar'] = data.fiveHour.bar;
+    texts['p-glm-used'] = String(data.fiveHour.pct);
+    texts['p-glm-remain'] = String(data.fiveHour.remainPct);
+    texts['p-glm-reset'] = data.fiveHour.resetIn || data.fiveHour.resetAt;
   }
   if (data.weekly) {
     texts['wk-pct'] = String(data.weekly.pct);

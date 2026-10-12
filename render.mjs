@@ -11,7 +11,7 @@ const esc = (s) =>
 const bar = (id, pct) =>
   `<div class="bar"><i id="${id}" style="width:${Math.max(0, Math.min(100, Number(pct) || 0))}%"></i></div>`;
 
-export function renderPage(data, dom) {
+export function renderPage(data, dom, build) {
   const t = dom.texts;
   const fh = data.fiveHour;
 
@@ -170,6 +170,11 @@ export function renderPage(data, dom) {
            padding: 26px 0; width: 100%; cursor: pointer; }
   button:active { background: #000; color: #fff; }
 
+  /* Header reload button: same 1-bit language, sized for a fingertip. */
+  .reload { width: auto; font-size: 32px; letter-spacing: 2px;
+            border-width: 5px; padding: 14px 24px; }
+  .reload:active { background: #000; color: #fff; }
+
   footer { display: flex; align-items: center; justify-content: space-between;
            padding: 0 40px; border-top: 6px solid #000; font-size: 26px; }
 </style>
@@ -183,6 +188,7 @@ export function renderPage(data, dom) {
       <span>套餐 <span class="level" id="level">${esc(t.level)}</span></span>
       <span>数据 <b id="health-mark">${esc(t['health-mark'])}</b></span>
       <span>更新于 <b id="fetched-at">${esc(t['fetched-at'])}</b></span>
+      <button class="reload" id="reload">刷新页面</button>
     </div>
   </header>
 
@@ -210,6 +216,11 @@ export function renderPage(data, dom) {
   // never touched, so an e-paper refresh stays local instead of a full repaint.
   var INTERVAL = 60000;
 
+  // Build id of the code that rendered this page. When the server starts serving
+  // a different build, the panel reloads itself once, so a deploy reaches the
+  // kiosk without anyone touching it.
+  var BUILD = ${JSON.stringify(build ?? 'dev')};
+
   function setText(id, value) {
     if (value === undefined || value === null) return;
     var el = document.getElementById(id);
@@ -225,6 +236,11 @@ export function renderPage(data, dom) {
 
   function apply(payload) {
     var k;
+    if (payload.build && payload.build !== BUILD) {
+      // The server is running newer code: one reload and the panel is current.
+      location.reload();
+      return;
+    }
     for (k in payload.texts) setText(k, payload.texts[k]);
     for (k in payload.bars) setBar(k, payload.bars[k]);
     setText('status-line', payload.stale
@@ -246,6 +262,12 @@ export function renderPage(data, dom) {
   }
 
   document.getElementById('refresh').addEventListener('click', refresh);
+
+  // Header button: full reload, i.e. re-run the SSR pipeline with fresh numbers.
+  document.getElementById('reload').addEventListener('click', function () {
+    location.reload();
+  });
+
   setInterval(refresh, INTERVAL);
 })();
 </script>

@@ -19,6 +19,7 @@
 //         PORT=8080 node server.mjs  (override)
 
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
@@ -29,6 +30,21 @@ import { renderPage } from './render.mjs';
 const HOST = process.env.HOST ?? '0.0.0.0';
 const PORT = Number(process.env.PORT ?? 15932);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), 'public');
+
+// Build id for the running code. The panel compares it on every 60s poll and
+// reloads itself when it changes, so a deploy reaches the kiosk unattended.
+const BUILD = await computeBuild();
+
+async function computeBuild() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const parts = await Promise.all(
+    ['server.mjs', 'usage.mjs', 'render.mjs'].map(async (name) => {
+      const info = await stat(join(here, name));
+      return `${name}:${info.size}:${Math.round(info.mtimeMs)}`;
+    }),
+  );
+  return createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 8);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -83,7 +99,7 @@ const server = createServer(async (req, res) => {
     // The panel: fetch usage (25s cache), render the whole page server-side.
     if (path === '/' || path === '/index.html') {
       const data = await getUsage();
-      const html = renderPage(data, toDom(data));
+      const html = renderPage(data, toDom(data), BUILD);
       return send(res, 200, req.method === 'HEAD' ? '' : html, {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Length': Buffer.byteLength(html),
@@ -93,7 +109,7 @@ const server = createServer(async (req, res) => {
     // What the 60s client updater patches text nodes from.
     if (path === '/api/usage') {
       const data = await getUsage();
-      return sendJson(res, req, { ...toDom(data), data });
+      return sendJson(res, req, { ...toDom(data), build: BUILD, data });
     }
 
     const file = resolvePath(path);

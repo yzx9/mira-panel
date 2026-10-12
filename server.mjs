@@ -84,6 +84,23 @@ function sendJson(res, req, payload) {
   });
 }
 
+// The viewport the kiosk last reported. A viewport smaller than the 2200x1650
+// design canvas is the usual reason "the layout does not fit", so record it
+// instead of guessing — the page scales itself to fit and tells us the numbers.
+let lastClient = null;
+
+function noteClientViewport(q) {
+  const vw = Number(q.get('vw'));
+  const vh = Number(q.get('vh'));
+  if (!vw || !vh) return;
+  const dpr = Number(q.get('dpr')) || 1;
+  const stamp = `${vw}x${vh} @${dpr}x`;
+  if (lastClient?.stamp === stamp) return;
+  lastClient = { stamp, at: new Date().toISOString().slice(11, 19) };
+  const fit = Math.min(vw / 2200, vh / 1650).toFixed(3);
+  process.stderr.write(`[mira-panel] kiosk viewport ${stamp}  ->  canvas scaled ${fit}\n`);
+}
+
 /** Structural GLM bits that cannot be patched as text -> part of the page signature. */
 function glmSignature(glm) {
   return createHash('sha1')
@@ -155,7 +172,9 @@ const server = createServer(async (req, res) => {
 
     // What the 60s client poll patches text nodes from (kept lean on purpose).
     if (path === '/api/state' || path === '/api/usage') {
-      const tab = new URL(req.url, 'http://localhost').searchParams.get('tab') === 'vikunja' ? 'vikunja' : 'glm';
+      const q = new URL(req.url, 'http://localhost').searchParams;
+      const tab = q.get('tab') === 'vikunja' ? 'vikunja' : 'glm';
+      noteClientViewport(q);
       const state = await stateFor(tab);
       return sendJson(res, req, {
         build: state.build,
@@ -167,10 +186,10 @@ const server = createServer(async (req, res) => {
       });
     }
 
-    // Debug view: full normalised payload for both sources.
+    // Debug view: full normalised payload for both sources + client viewport.
     if (path === '/api/raw') {
       const state = await stateFor('glm');
-      return sendJson(res, req, { glm: state.glm, tasks: state.tasks });
+      return sendJson(res, req, { glm: state.glm, tasks: state.tasks, client: lastClient });
     }
 
     const file = resolvePath(path);

@@ -79,11 +79,10 @@ function glmMain({ data, dom }) {
   const mcp = data.mcp
     ? `
       <section class="card">
-        <h2>MCP 月额度 <span class="tag">TIME_LIMIT · unit=5</span></h2>
+        <h2>MCP 月额度 <span class="tag">unit=5 ・ <span id="mcp-reset-in">${esc(t['mcp-reset-in'])}</span> 后重置</span></h2>
         <div class="big"><span id="mcp-used">${esc(t['mcp-used'])}</span><span class="small"> / <span id="mcp-total">${esc(t['mcp-total'])}</span></span></div>
         ${bar('mcp-bar', data.mcp.bar)}
-        <div class="kv">已用 <b id="mcp-pct">${esc(t['mcp-pct'])}</b>% ・ 剩余 <b id="mcp-remain">${esc(t['mcp-remain'])}</b></div>
-        <div class="kv dim"><span id="mcp-reset-at">${esc(t['mcp-reset-at'])}</span> 重置（<span id="mcp-reset-in">${esc(t['mcp-reset-in'])}</span>）</div>
+        <div class="kv">已用 <b id="mcp-pct">${esc(t['mcp-pct'])}</b>% ・ 剩余 <b id="mcp-remain">${esc(t['mcp-remain'])}</b> ・ <span id="mcp-reset-at">${esc(t['mcp-reset-at'])}</span> 重置</div>
         <table class="rows">
           ${data.mcp.details
             .map(
@@ -99,8 +98,7 @@ function glmMain({ data, dom }) {
     ? `
       <section class="card">
         <h2>近 24 小时模型用量</h2>
-        <div class="big"><span id="us-calls">${esc(t['us-calls'])}</span><span class="small"> 次调用</span></div>
-        <div class="kv">合计 <b id="us-tokens">${esc(t['us-tokens'])}</b> tokens</div>
+        <div class="big"><span id="us-calls">${esc(t['us-calls'])}</span><span class="small"> 次调用 ・ <b id="us-tokens">${esc(t['us-tokens'])}</b> tokens</span></div>
         <table class="rows">
           ${data.usage.models
             .map(
@@ -271,8 +269,15 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
     touch-action: manipulation; overscroll-behavior: none;
   }
 
-  .screen { height: 100vh; display: grid; grid-template-rows: 120px 1fr 62px; }
-
+  /* Fixed 2200x1650 design canvas, scaled to whatever viewport the kiosk really
+     reports. On the Mira (2200x1650 CSS px) the factor is 1, so 1 CSS px = 1
+     physical px; on a smaller or high-DPR viewport the whole panel scales down
+     instead of overflowing — overflow is what squashed the bars and pushed card
+     content out of its border. */
+  .viewport { position: fixed; inset: 0; overflow: hidden; background: #fff; }
+  .screen { width: 2200px; height: 1650px; display: grid;
+            grid-template-rows: 116px 1fr 54px;
+            transform: scale(var(--fit, 1)); transform-origin: 0 0; }
   /* ---------------------------------------------------------- navbar */
   header { display: flex; align-items: center; justify-content: space-between;
            padding: 0 34px; border-bottom: 6px solid #000; }
@@ -295,52 +300,58 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
   .tab-sub { font-size: 26px; line-height: 1.4; }
   .rail-note { margin-top: auto; font-size: 24px; line-height: 1.5; }
 
-  main { padding: 18px; display: grid; grid-template-columns: 1fr 1fr;
-         gap: 16px; align-content: start; min-height: 0;
+  main { padding: 14px; display: grid; grid-template-columns: 1fr 1fr;
+         gap: 14px; align-content: start; min-height: 0;
          overflow-y: auto; scrollbar-width: none; }
   main::-webkit-scrollbar { display: none; }
 
-  .card { border: 6px solid #000; padding: 22px 26px; display: flex;
-          flex-direction: column; gap: 12px; overflow: hidden; }
+  /* No overflow:hidden here: a card that does not fit must never silently
+     swallow a row of text — better to see it spilling than to lose it.
+     No min-height:0 either — that lets a grid row be sized by the SHORTER
+     card in the row, which is how the third MCP detail row escaped its box. */
+  .card { border: 6px solid #000; padding: 18px 22px; display: flex;
+          flex-direction: column; gap: 10px; }
   .card.wide { grid-column: span 2; }
 
-  h2 { font-size: 36px; font-weight: 900; letter-spacing: 1px; }
+  h2 { font-size: 32px; font-weight: 900; letter-spacing: 1px; }
   .tag { font-size: 20px; font-weight: 400; border: 3px solid #000; padding: 2px 10px;
          vertical-align: middle; margin-left: 10px; }
 
   /* ------------------------------------------------------ sections */
-  .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 26px; }
-  .hero-num { font-size: 170px; font-weight: 900; line-height: 0.9; display: flex;
+  .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+  .hero-num { font-size: 146px; font-weight: 900; line-height: 0.9; display: flex;
               align-items: baseline; }
-  .hero-num .pct { font-size: 76px; margin-left: 8px; }
-  .hero-cap { font-size: 30px; font-weight: 400; margin-left: 18px; }
-  .hero-side { display: flex; flex-direction: column; gap: 10px; font-size: 32px; text-align: right; }
-  .kv.strong { font-size: 44px; font-weight: 900; }
+  .hero-num .pct { font-size: 62px; margin-left: 8px; }
+  .hero-cap { font-size: 28px; font-weight: 400; margin-left: 16px; }
+  .hero-side { display: flex; flex-direction: column; gap: 8px; font-size: 30px; text-align: right; }
+  .kv.strong { font-size: 38px; font-weight: 900; }
 
-  .big { font-size: 84px; font-weight: 900; line-height: 1; }
-  .big .small { font-size: 32px; font-weight: 400; }
-  .kv { font-size: 30px; }
-  .kv.dim { font-size: 24px; }
-  .hint { font-size: 22px; margin-top: auto; }
-  .empty { font-size: 30px; margin-top: 8px; }
-  .more { font-size: 24px; margin-top: auto; }
+  .big { font-size: 68px; font-weight: 900; line-height: 1; }
+  .big .small { font-size: 28px; font-weight: 400; }
+  .kv { font-size: 28px; }
+  .kv.dim { font-size: 22px; }
+  .hint { font-size: 21px; margin-top: auto; }
+  .empty { font-size: 28px; margin-top: 6px; }
+  .more { font-size: 23px; margin-top: auto; }
 
-  .bar { border: 5px solid #000; height: 40px; padding: 4px; }
-  .bar i { display: block; height: 100%; background: #000; }
+  /* flex:none — a height-constrained card must never squash the bars, which is
+     what happened when the whole grid overflowed the viewport. */
+  .bar { border: 5px solid #000; height: 44px; padding: 4px; flex: none; }
+  .bar i { display: block; height: 100%; min-height: 26px; background: #000; }
 
-  table.rows { width: 100%; border-collapse: collapse; font-size: 27px; }
-  table.rows td { padding: 7px 0; border-top: 3px solid #000; vertical-align: top; }
+  table.rows { width: 100%; border-collapse: collapse; font-size: 26px; }
+  table.rows td { padding: 5px 0; border-top: 3px solid #000; vertical-align: top; }
   table.rows tr:first-child td { border-top: 5px solid #000; }
   table.rows td.num { text-align: right; font-weight: 900; white-space: nowrap; padding-left: 14px; }
   table.rows td.title { width: 100%; }
-  table.rows td.proj { white-space: nowrap; padding-left: 14px; font-size: 23px; }
-  table.big-rows { font-size: 32px; }
-  table.big-rows td.num { font-size: 40px; }
+  table.rows td.proj { white-space: nowrap; padding-left: 14px; font-size: 22px; }
+  table.big-rows { font-size: 29px; }
+  table.big-rows td.num { font-size: 36px; }
 
-  .chart { display: flex; align-items: flex-end; gap: 6px; height: 180px;
-           border-bottom: 5px solid #000; }
+  .chart { display: flex; align-items: flex-end; gap: 6px; height: 150px;
+           border-bottom: 5px solid #000; flex: none; }
   .chart i { flex: 1 1 0; background: #000; min-height: 3px; }
-  .axis { display: flex; justify-content: space-between; font-size: 24px; }
+  .axis { display: flex; justify-content: space-between; font-size: 23px; }
 
   button { font: inherit; font-weight: 900; letter-spacing: 2px; background: #fff;
            color: #000; border: 5px solid #000; padding: 12px 22px; cursor: pointer; }
@@ -351,6 +362,18 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
 </style>
 </head>
 <body>
+<script>
+/* Size the fixed design canvas to the real viewport before first paint. */
+(function () {
+  function fit() {
+    var s = Math.min(window.innerWidth / 2200, window.innerHeight / 1650);
+    document.documentElement.style.setProperty('--fit', s);
+  }
+  fit();
+  window.addEventListener('resize', fit);
+})();
+</script>
+<div class="viewport">
 <div class="screen">
 
   <header>
@@ -375,6 +398,7 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
     <div id="status-line">每 60 秒自动更新（只重绘变化的数字）</div>
   </footer>
 
+</div>
 </div>
 <script>
 (function () {
@@ -413,7 +437,11 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
   function refresh() {
     var el = document.getElementById('status-line');
     var before = el ? el.textContent : '';
-    fetch('/api/state?tab=' + TAB, { cache: 'no-store' })
+    // Also report the viewport, so the server log tells us what the kiosk really
+    // renders at (a smaller/high-DPR viewport is what breaks the fixed layout).
+    var qs = '&vw=' + window.innerWidth + '&vh=' + window.innerHeight +
+             '&dpr=' + (window.devicePixelRatio || 1);
+    fetch('/api/state?tab=' + TAB + qs, { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (p) {
         apply(p);

@@ -156,7 +156,18 @@ function glmMain({ data, dom }) {
         ${bar('wk-bar', data.weekly.bar)}
         <div class="kv">剩余 <b id="wk-remain">${esc(t['wk-remain'])}</b>% ・ <b id="wk-reset-in">${esc(t['wk-reset-in'])}</b></div>
       </section>`
-    : '';
+    : `
+      <section class="card">
+        <h2>状态</h2>
+        <table class="rows">
+          <tr><td>数据源</td><td class="num">open.bigmodel.cn</td></tr>
+          <tr><td>套餐</td><td class="num" id="st-level">${esc(t.level)}</td></tr>
+          <tr><td>更新于</td><td class="num" id="st-fetched">${esc(t['fetched-at'])}</td></tr>
+          <tr><td>5h 重置</td><td class="num" id="st-reset">${esc(t['p-glm-reset'])}</td></tr>
+          <tr><td>取数</td><td class="num">服务端 25s 缓存</td></tr>
+        </table>
+        <div class="hint">周额度项本账号未返回，按官方约定隐藏</div>
+      </section>`;
 
   return `${hero}
     ${mcp}
@@ -299,7 +310,7 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
 
   /* ------------------------------------------------------ sections */
   .hero-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 26px; }
-  .hero-num { font-size: 200px; font-weight: 900; line-height: 0.9; display: flex;
+  .hero-num { font-size: 170px; font-weight: 900; line-height: 0.9; display: flex;
               align-items: baseline; }
   .hero-num .pct { font-size: 76px; margin-left: 8px; }
   .hero-cap { font-size: 30px; font-weight: 400; margin-left: 18px; }
@@ -326,7 +337,7 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
   table.big-rows { font-size: 32px; }
   table.big-rows td.num { font-size: 40px; }
 
-  .chart { display: flex; align-items: flex-end; gap: 6px; height: 220px;
+  .chart { display: flex; align-items: flex-end; gap: 6px; height: 180px;
            border-bottom: 5px solid #000; }
   .chart i { flex: 1 1 0; background: #000; min-height: 3px; }
   .axis { display: flex; justify-content: space-between; font-size: 24px; }

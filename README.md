@@ -68,7 +68,13 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
 
 ## TODO
 
-- [ ] 持久化：当前是 Hermes 后台拉起的进程，gateway 重启会掉 → 是否改成 PID 1 管理的 systemd 服务
-- [ ] `~/git/mira-panel` 尚未 `git init`
+- [x] `git init` + 首次提交（`feat: add e-paper panel serving GLM Coding Plan usage`）
+- [ ] 持久化：**已决定先保持现状**（Hermes 后台拉起的进程；gateway 重启后需手动重启）
 - [ ] 面板是否要加其他数据源（Vikunja / Readeck / FreshRSS / HN）
 - [ ] 是否把 Pi 的字体改动（`noto-fonts-cjk-sans`）固化进 nix-config 仓库
+
+## 重启服务（掉线时）
+
+```bash
+cd ~/git/mira-panel && node server.mjs
+```

@@ -117,6 +117,27 @@ GET /api/v1/tasks?filter=done = false&sort_by=due_date&order_by=asc&per_page=200
 4. 页面按 2200 × 1650 设计（1 CSS px = 1 物理 px），触摸目标远大于 44 px
 5. 只做增量文字更新，不做无意义的整页重载
 
+### 布局排版的三条硬规矩（都是踩过的坑）
+
+1. **固定画布 + 按视口缩放**：`.screen` 是 2200 × 1650 的固定画布，用
+   `transform: scale(min(vw/2200, vh/1650))` 适配。首屏前（`<body>` 开头的内联脚本）
+   就把 `--fit` 算好，避免闪一下再缩。本机 Pi 实测视口 2200×1650 @1x → scale 1.000，
+   仍是原生 1:1；换成更小或高 DPR 的视口时整页等比缩小，而不会溢出把布局压扁。
+2. **卡片上绝不能写 `min-height: 0`**：那会让网格行高被同一行里**更矮**的那张卡决定，
+   于是高卡的内容（例如 MCP 的第三行分项）会跑到边框外面。行高必须由最高内容决定。
+3. **进度条 / 图表必须 `flex: none`**：卡片是 flex 列容器，一旦卡盒比内容矮，
+   默认 `flex-shrink: 1` 会把进度条压成一条线（看起来就是"进度条坏了"）。
+   同时卡片**不要**加 `overflow: hidden`，宁可看见溢出也不要静默丢内容。
+
+诊断手段：60 秒轮询会把 `vw/vh/dpr` 一起报给服务端（`noteClientViewport`），
+服务端日志与 `/api/raw` 的 `client` 字段都能看到真实视口 —— 布局问题时先查这个，
+不要靠猜。本地可以用无头 Chromium 自己截图验收：
+
+```bash
+nix-shell -p chromium --run 'chromium --headless=new --disable-gpu --no-sandbox \
+  --hide-scrollbars --window-size=2200,1650 --screenshot=/tmp/shot.png http://127.0.0.1:15932/glm'
+```
+
 ## 安全
 
 - 两个 token 都**只在服务端内存**中使用：不落盘、不进 argv/env（GLM 走 `execFile(helper)` 的 stdout，Vikunja 走 Bearer 头）、不写日志

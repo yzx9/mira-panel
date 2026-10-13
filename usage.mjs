@@ -118,8 +118,10 @@ function resetInfo(ms) {
 
 function windowParams() {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, now.getHours(), 0, 0, 0);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 59, 59, 999);
+  // Today only — the panel shows a day's usage, not a rolling 24h window
+  // (verified: totalUsage is computed over exactly the requested window).
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   const stamp = (d) =>
     `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
   return `?startTime=${encodeURIComponent(stamp(start))}&endTime=${encodeURIComponent(stamp(end))}`;

@@ -15,10 +15,13 @@ rail  │  detail（当前 tab 的完整内容）
 30%   │  70%
       │
  GLM  │  /glm     5 小时额度（大号「已用」%）、MCP 月额度 + 分项、
- 用量 │            近 24 小时模型用量、逐小时 tokens 图、工具调用、周额度
+ 用量 │            今天模型用量、工具调用、状态
 ──────│
 Vikunja│ /vikunja 今日到期、未来 7 天、逾期、汇总（未完成 / 无期限 / 7 天以后）
 ```
+
+**面板上只放数据，不放开发者说明或操作提示** —— "API key 怎么解析""每 60 秒只重绘变化
+的数字""点左侧标签切换"这类文字只属于 README 和聊天窗口，出现在电子纸上就是噪声。
 
 - **tab 是普通链接**（`/glm`、`/vikunja`）：切换 = 一次 SSR 请求，无前端路由、无框架；JS 关闭也能读
 - **rail 里的预览刻意极简**：GLM 只显示 5 小时额度，Vikunja 只显示今日 + 逾期 + 未完成
@@ -77,7 +80,9 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
   - `TOKENS_LIMIT unit=6 number=1` → 周池（部分账号不返回 → 隐藏该项）
   - `TIME_LIMIT unit=5 number=1` → MCP / 工具月额度
 - `percentage` 是**已用**百分比；界面展示剩余时用 `100 - percentage`
-- 逐小时图用 `model-usage` 的 `tokensUsage` 序列 + `x_time` 标签（25 个小时桶，界面写"近 24 小时"）
+- 时间窗 = **今天 00:00:00 → 23:59:59**（不是滚动 24 小时：面板关心的是"今天用了多少"）。
+  已验证 `totalUsage` 完全按请求窗口统计（与小时桶求和逐位一致），所以"今天"的数字是当天真实累计。
+- 逐小时的 `tokensUsage` / `x_time` 仍保留在 `/api/raw` 里（将来若要做趋势图直接用），但面板不再画图
 
 ### Vikunja（`/vikunja`）
 
@@ -128,6 +133,10 @@ GET /api/v1/tasks?filter=done = false&sort_by=due_date&order_by=asc&per_page=200
 3. **进度条 / 图表必须 `flex: none`**：卡片是 flex 列容器，一旦卡盒比内容矮，
    默认 `flex-shrink: 1` 会把进度条压成一条线（看起来就是"进度条坏了"）。
    同时卡片**不要**加 `overflow: hidden`，宁可看见溢出也不要静默丢内容。
+4. **网格行填满高度**：`main` 不加 `align-content: start`，让 auto 行拉伸铺满，
+   否则内容变少时底部会留一条难看的空白带。
+5. **面板上只放数据**：开发者说明（密钥怎么来的、缓存多少秒、怎么刷新）一律写进 README，
+   不要出现在电子纸上；错误状态走 navbar 的「数据」位（正常 / ⚠ 数据陈旧 / 已刷新 HH:MM:SS）。
 
 诊断手段：60 秒轮询会把 `vw/vh/dpr` 一起报给服务端（`noteClientViewport`），
 服务端日志与 `/api/raw` 的 `client` 字段都能看到真实视口 —— 布局问题时先查这个，

@@ -39,10 +39,6 @@ function tabRail({ tab, glmDom, tasksDom }) {
         `逾期 <b id="p-vk-overdue">${esc(v['p-vk-overdue'])}</b> ・ 未完成 <b id="p-vk-open">${esc(v['p-vk-open'])}</b>`,
         '/vikunja',
       )}
-      <div class="rail-note">
-        <div>点左侧标签切换面板</div>
-        <div id="rail-status">状态 <b id="status-mark">${esc(['glm', 'vikunja'].includes(tab) ? '正常' : '—')}</b></div>
-      </div>
     </nav>`;
 }
 
@@ -68,12 +64,11 @@ function glmMain({ data, dom }) {
           </div>
         </div>
         ${bar('fh-bar', fh.bar)}
-        <div class="hint">额度耗尽要等下一个 5 小时周期；keepalive 盯着的就是这个窗口</div>
       </section>`
     : `
       <section class="card wide hero">
         <h2>5 小时额度</h2>
-        <div class="hint">接口本次没有返回该项 —— 按官方约定隐藏，而不是显示空卡</div>
+        <div class="empty">接口本次没有返回该项 —— 按官方约定隐藏，而不是显示空卡</div>
       </section>`;
 
   const mcp = data.mcp
@@ -92,12 +87,12 @@ function glmMain({ data, dom }) {
             .join('')}
         </table>
       </section>`
-    : `<section class="card"><h2>MCP 月额度</h2><div class="hint">接口本次没有返回该项</div></section>`;
+    : `<section class="card"><h2>MCP 月额度</h2><div class="empty">接口本次没有返回该项</div></section>`;
 
   const usage = data.usage
     ? `
       <section class="card">
-        <h2>近 24 小时模型用量</h2>
+        <h2>今天模型用量</h2>
         <div class="big"><span id="us-calls">${esc(t['us-calls'])}</span><span class="small"> 次调用 ・ <b id="us-tokens">${esc(t['us-tokens'])}</b> tokens</span></div>
         <table class="rows">
           ${data.usage.models
@@ -108,12 +103,12 @@ function glmMain({ data, dom }) {
             .join('')}
         </table>
       </section>`
-    : `<section class="card"><h2>近 24 小时模型用量</h2><div class="hint">暂不可用</div></section>`;
+    : `<section class="card"><h2>今天模型用量</h2><div class="empty">暂不可用</div></section>`;
 
   const tools = data.usage
     ? `
       <section class="card">
-        <h2>工具调用 <span class="tag">近 24 小时</span></h2>
+        <h2>工具调用 <span class="tag">今天</span></h2>
         <table class="rows big-rows">
           ${data.usage.tools
             .map(
@@ -123,28 +118,7 @@ function glmMain({ data, dom }) {
             .join('')}
         </table>
       </section>`
-    : `<section class="card"><h2>工具调用</h2><div class="hint">暂不可用</div></section>`;
-
-  const hourly = data.usage?.hourlyTokens?.length
-    ? (() => {
-        const series = data.usage.hourlyTokens;
-        const labels = data.usage.hourlyLabels ?? [];
-        const max = Math.max(...series, 1);
-        const peak = series.indexOf(max);
-        const bars = series
-          .map((v, i) => {
-            const h = Math.max(2, Math.round((v / max) * 100));
-            return `<i style="height:${h}%" title="${esc(labels[i] ?? '')}"></i>`;
-          })
-          .join('');
-        return `
-      <section class="card wide">
-        <h2>逐小时 tokens <span class="tag">峰值 ${esc((max / 1e6).toFixed(0))}M @ ${esc(labels[peak] ?? '')}</span></h2>
-        <div class="chart">${bars}</div>
-        <div class="axis"><span>${esc(labels[0] ?? '')}</span><span>${esc(labels[labels.length - 1] ?? '')}</span></div>
-      </section>`;
-      })()
-    : '';
+    : `<section class="card"><h2>工具调用</h2><div class="empty">暂不可用</div></section>`;
 
   const weekly = data.weekly
     ? `
@@ -158,19 +132,15 @@ function glmMain({ data, dom }) {
       <section class="card">
         <h2>状态</h2>
         <table class="rows">
-          <tr><td>数据源</td><td class="num">open.bigmodel.cn</td></tr>
           <tr><td>套餐</td><td class="num" id="st-level">${esc(t.level)}</td></tr>
           <tr><td>更新于</td><td class="num" id="st-fetched">${esc(t['fetched-at'])}</td></tr>
-          <tr><td>5h 重置</td><td class="num" id="st-reset">${esc(t['p-glm-reset'])}</td></tr>
-          <tr><td>取数</td><td class="num">服务端 25s 缓存</td></tr>
+          <tr><td>5 小时重置</td><td class="num" id="st-reset">${esc(t['p-glm-reset'])}</td></tr>
         </table>
-        <div class="hint">周额度项本账号未返回，按官方约定隐藏</div>
       </section>`;
 
   return `${hero}
     ${mcp}
     ${usage}
-    ${hourly}
     ${tools}
     ${weekly}`;
 }
@@ -197,7 +167,7 @@ function taskRows(items, cap) {
 
 function vikunjaMain({ data }) {
   if (!data.buckets) {
-    return `<section class="card wide"><h2>Vikunja</h2><div class="hint">取数失败：${esc(data.error ?? '未知错误')}</div></section>`;
+    return `<section class="card wide"><h2>Vikunja</h2><div class="empty">取数失败：${esc(data.error ?? '未知错误')}</div></section>`;
   }
   const b = data.buckets;
   const c = data.counts;
@@ -239,11 +209,12 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
 
   const main = isVikunja ? vikunjaMain({ data: tasks }) : glmMain({ data: glm, dom: glmDom });
 
+  // Panel-facing chrome only: the plan level lives in the 状态 card, and dev
+  // notes belong in the README, not on the e-paper.
   const meta = isVikunja
     ? `<span>未完成 <b id="head-count">${esc(String(tasks.counts?.open ?? '—'))}</b></span>
        <span>数据 <b id="health-mark">${esc(tasksDom.texts['vk-health'])}</b></span>`
-    : `<span>套餐 <span class="level" id="level">${esc(glmDom.texts.level)}</span></span>
-       <span>数据 <b id="health-mark">${esc(glmDom.texts['health-mark'])}</b></span>`;
+    : `<span>数据 <b id="health-mark">${esc(glmDom.texts['health-mark'])}</b></span>`;
 
   return `<!doctype html>
 <html lang="zh-CN">
@@ -276,14 +247,13 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
      content out of its border. */
   .viewport { position: fixed; inset: 0; overflow: hidden; background: #fff; }
   .screen { width: 2200px; height: 1650px; display: grid;
-            grid-template-rows: 116px 1fr 54px;
+            grid-template-rows: 116px 1fr;
             transform: scale(var(--fit, 1)); transform-origin: 0 0; }
   /* ---------------------------------------------------------- navbar */
   header { display: flex; align-items: center; justify-content: space-between;
            padding: 0 34px; border-bottom: 6px solid #000; }
   h1 { font-size: 52px; font-weight: 900; letter-spacing: 4px; }
   .head-right { display: flex; align-items: center; gap: 22px; font-size: 28px; }
-  .level { border: 5px solid #000; padding: 4px 18px; font-size: 30px; font-weight: 900; letter-spacing: 2px; }
 
   /* ------------------------------------------------------------ body */
   .body { display: grid; grid-template-columns: 30% 1fr; min-height: 0; }
@@ -298,10 +268,11 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
   .tab-preview { font-size: 92px; font-weight: 900; line-height: 1; }
   .tab-preview .unit { font-size: 30px; font-weight: 400; margin-left: 10px; }
   .tab-sub { font-size: 26px; line-height: 1.4; }
-  .rail-note { margin-top: auto; font-size: 24px; line-height: 1.5; }
 
+  /* Rows stretch to fill the screen: the extra height stays inside the card
+     frames instead of leaving a dead band at the bottom. */
   main { padding: 14px; display: grid; grid-template-columns: 1fr 1fr;
-         gap: 14px; align-content: start; min-height: 0;
+         gap: 14px; min-height: 0;
          overflow-y: auto; scrollbar-width: none; }
   main::-webkit-scrollbar { display: none; }
 
@@ -330,7 +301,6 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
   .big .small { font-size: 28px; font-weight: 400; }
   .kv { font-size: 28px; }
   .kv.dim { font-size: 22px; }
-  .hint { font-size: 21px; margin-top: auto; }
   .empty { font-size: 28px; margin-top: 6px; }
   .more { font-size: 23px; margin-top: auto; }
 
@@ -348,17 +318,9 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
   table.big-rows { font-size: 29px; }
   table.big-rows td.num { font-size: 36px; }
 
-  .chart { display: flex; align-items: flex-end; gap: 6px; height: 150px;
-           border-bottom: 5px solid #000; flex: none; }
-  .chart i { flex: 1 1 0; background: #000; min-height: 3px; }
-  .axis { display: flex; justify-content: space-between; font-size: 23px; }
-
   button { font: inherit; font-weight: 900; letter-spacing: 2px; background: #fff;
            color: #000; border: 5px solid #000; padding: 12px 22px; cursor: pointer; }
   button:active { background: #000; color: #fff; }
-
-  footer { display: flex; align-items: center; justify-content: space-between;
-           padding: 0 34px; border-top: 6px solid #000; font-size: 24px; }
 </style>
 </head>
 <body>
@@ -393,11 +355,6 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
     </main>
   </div>
 
-  <footer>
-    <div>${isVikunja ? '数据源 todo.example.com ・ Bearer token 由服务端解析' : '数据源 open.bigmodel.cn ・ API key 由 nix 链在服务端解析'} ・ 树莓派端零外部请求</div>
-    <div id="status-line">每 60 秒自动更新（只重绘变化的数字）</div>
-  </footer>
-
 </div>
 </div>
 <script>
@@ -429,32 +386,27 @@ export function renderPage({ tab, build, signature, glm, glmDom, tasks, tasksDom
     if (payload.signature && payload.signature !== SIGNATURE) { location.reload(); return; }
     for (k in payload.texts) setText(k, payload.texts[k]);
     for (k in payload.bars) setBar(k, payload.bars[k]);
-    setText('status-line', payload.stale
-      ? ('⚠ 取数失败：' + (payload.error || '未知错误'))
-      : '每 60 秒自动更新（只重绘变化的数字）');
   }
 
-  function refresh() {
-    var el = document.getElementById('status-line');
-    var before = el ? el.textContent : '';
-    // Also report the viewport, so the server log tells us what the kiosk really
-    // renders at (a smaller/high-DPR viewport is what breaks the fixed layout).
+  // manual = the user tapped 刷新数据: acknowledge in the navbar health slot
+  // (the next poll overwrites it with the plain 正常 / 数据陈旧 state).
+  function refresh(manual) {
     var qs = '&vw=' + window.innerWidth + '&vh=' + window.innerHeight +
              '&dpr=' + (window.devicePixelRatio || 1);
     fetch('/api/state?tab=' + TAB + qs, { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (p) {
         apply(p);
-        if (el && el.textContent === before) {
-          setText('status-line', '已检查，数据无变化 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+        if (manual && !p.stale) {
+          setText('health-mark', '已刷新 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }));
         }
       })
-      .catch(function (e) { setText('status-line', '⚠ 请求失败：' + e.message); });
+      .catch(function () { setText('health-mark', '⚠ 请求失败'); });
   }
 
-  document.getElementById('refresh').addEventListener('click', refresh);
+  document.getElementById('refresh').addEventListener('click', function () { refresh(true); });
   document.getElementById('reload').addEventListener('click', function () { location.reload(); });
-  setInterval(refresh, INTERVAL);
+  setInterval(function () { refresh(false); }, INTERVAL);
 })();
 </script>
 </body>

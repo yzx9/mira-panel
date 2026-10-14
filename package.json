@@ -1,0 +1,22 @@
+{
+  "name": "mira-panel",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @mira-panel/server",
+    "build": "npm run build -w @mira-panel/web",
+    "start": "npm run start -w @mira-panel/server",
+    "typecheck": "npm run typecheck -w @mira-panel/shared && npm run typecheck -w @mira-panel/server && npm run typecheck -w @mira-panel/web",
+    "test": "npm run test -w @mira-panel/shared",
+    "fmt": "oxfmt .",
+    "fmt:check": "oxfmt --check ."
+  },
+  "devDependencies": {
+    "oxfmt": "^0.73.0",
+    "typescript": "~5.9.0"
+  }
+}

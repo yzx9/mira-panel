@@ -2,3 +2,9 @@
 *.log
 node_modules/
 .DS_Store
+
+# Build output (web client + SSR bundles)
+dist/
+
+# direnv / nix dev shell cache
+.direnv/

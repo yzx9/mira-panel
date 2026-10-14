@@ -1,6 +1,6 @@
-import { fileURLToPath } from 'node:url';
-import vue from '@vitejs/plugin-vue';
-import { defineConfig } from 'vite';
+import { fileURLToPath } from "node:url";
+import vue from "@vitejs/plugin-vue";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [
@@ -13,7 +13,7 @@ export default defineConfig({
     // server, bundled source here) — one alias covers dev SSR, client build
     // and the SSR build alike.
     alias: {
-      '@mira-panel/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)),
+      "@mira-panel/shared": fileURLToPath(new URL("../shared/src/index.ts", import.meta.url)),
     },
   },
   // The SSR bundle must carry the whole Vue runtime: @vue/runtime-vapor ships
@@ -26,9 +26,9 @@ export default defineConfig({
     resolve: { conditions: [] },
   },
   define: {
-    __VUE_OPTIONS_API__: 'false',
-    __VUE_PROD_DEVTOOLS__: 'false',
-    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false',
+    __VUE_OPTIONS_API__: "false",
+    __VUE_PROD_DEVTOOLS__: "false",
+    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: "false",
   },
-  build: { outDir: 'dist/client' },
+  build: { outDir: "dist/client" },
 });

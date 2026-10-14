@@ -17,13 +17,13 @@
 //   TIME_LIMIT   unit=5 number=1 -> MCP / tool monthly pool
 // Missing items must be hidden, never rendered as empty cards.
 
-import { execFile } from 'node:child_process';
-import { readFile, realpath } from 'node:fs/promises';
-import { promisify } from 'node:util';
+import { execFile } from "node:child_process";
+import { readFile, realpath } from "node:fs/promises";
+import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-const CLAUDE_WRAPPER = '/etc/profiles/per-user/yzx9/bin/claude';
+const CLAUDE_WRAPPER = "/etc/profiles/per-user/yzx9/bin/claude";
 const SETTINGS_RE = /\/nix\/store\/[^"'\s]*claude-code-glm-settings\.json/;
 
 const CRED_TTL_MS = 10 * 60 * 1000; // key/host rarely change
@@ -39,11 +39,11 @@ async function credentials() {
   if (cred.key && Date.now() - cred.at < CRED_TTL_MS) return cred;
 
   const wrapper = await realpath(CLAUDE_WRAPPER);
-  const wrapperText = await readFile(wrapper, 'utf8');
+  const wrapperText = await readFile(wrapper, "utf8");
   const settingsPath = wrapperText.match(SETTINGS_RE)?.[0];
   if (!settingsPath) throw new Error(`no claude-code-glm-settings.json referenced by ${wrapper}`);
 
-  const settings = JSON.parse(await readFile(settingsPath, 'utf8'));
+  const settings = JSON.parse(await readFile(settingsPath, "utf8"));
   const env = settings.env ?? {};
   const helper = settings.apiKeyHelper;
   if (!helper) throw new Error(`settings ${settingsPath} has no apiKeyHelper`);
@@ -63,8 +63,8 @@ async function getJson(url, key) {
   const res = await fetch(url, {
     headers: {
       Authorization: key, // raw key: no Bearer prefix
-      'Accept-Language': 'zh-CN,zh',
-      Accept: 'application/json',
+      "Accept-Language": "zh-CN,zh",
+      Accept: "application/json",
     },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -79,7 +79,7 @@ async function getJson(url, key) {
 
 // ---------------------------------------------------------------- formatting
 
-const two = (n) => String(n).padStart(2, '0');
+const two = (n) => String(n).padStart(2, "0");
 
 const fmtTime = (d) => `${two(d.getHours())}:${two(d.getMinutes())}`;
 const fmtDate = (d) => `${d.getMonth() + 1}-${two(d.getDate())}`;
@@ -96,16 +96,16 @@ function fmtCountdown(ms) {
 
 /** 1_000_479_997 -> "10.0亿"; keeps the panel narrow and stable-width. */
 function fmtTokens(n) {
-  if (!Number.isFinite(n)) return '—';
+  if (!Number.isFinite(n)) return "—";
   if (n >= 1e8) return `${(n / 1e8).toFixed(n >= 1e9 ? 1 : 2)}亿`;
   if (n >= 1e4) return `${(n / 1e4).toFixed(1)}万`;
   return String(n);
 }
 
-const fmtInt = (n) => (Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
+const fmtInt = (n) => (Number.isFinite(n) ? n.toLocaleString("en-US") : "—");
 
 function resetInfo(ms) {
-  if (!Number.isFinite(ms)) return { at: '未知', in: '' };
+  if (!Number.isFinite(ms)) return { at: "未知", in: "" };
   const d = new Date(ms);
   const hoursAway = (ms - Date.now()) / 3_600_000;
   return {
@@ -130,25 +130,30 @@ function windowParams() {
 function normaliseQuota(data) {
   const limits = data?.limits ?? [];
   const find = (type, unit, number) =>
-    limits.find((l) => l.type === type && (unit === undefined || l.unit === unit) && (number === undefined || l.number === number));
+    limits.find(
+      (l) =>
+        l.type === type &&
+        (unit === undefined || l.unit === unit) &&
+        (number === undefined || l.number === number),
+    );
 
-  const out = { level: (data?.level ?? '').toUpperCase(), fiveHour: null, weekly: null, mcp: null };
+  const out = { level: (data?.level ?? "").toUpperCase(), fiveHour: null, weekly: null, mcp: null };
 
-  const five = find('TOKENS_LIMIT', 3, 5) ?? find('TOKENS_LIMIT', 3);
+  const five = find("TOKENS_LIMIT", 3, 5) ?? find("TOKENS_LIMIT", 3);
   if (five) {
     const pct = Math.round(five.percentage ?? 0);
     const r = resetInfo(five.nextResetTime);
     out.fiveHour = { pct, remainPct: 100 - pct, bar: pct, resetAt: r.at, resetIn: r.in };
   }
 
-  const week = find('TOKENS_LIMIT', 6);
+  const week = find("TOKENS_LIMIT", 6);
   if (week) {
     const pct = Math.round(week.percentage ?? 0);
     const r = resetInfo(week.nextResetTime);
     out.weekly = { pct, remainPct: 100 - pct, bar: pct, resetAt: r.at, resetIn: r.in };
   }
 
-  const mcp = find('TIME_LIMIT', 5, 1) ?? find('TIME_LIMIT', 5);
+  const mcp = find("TIME_LIMIT", 5, 1) ?? find("TIME_LIMIT", 5);
   if (mcp) {
     const used = mcp.currentValue ?? 0;
     const total = mcp.usage ?? 100;
@@ -175,9 +180,9 @@ function normaliseUsage(modelData, toolData) {
   const hourCalls = modelData?.modelCallCount ?? [];
 
   const tools = [
-    { name: '联网搜索', count: (toolData?.networkSearchCount ?? []).reduce((a, b) => a + b, 0) },
-    { name: '网页读取', count: (toolData?.webReadMcpCount ?? []).reduce((a, b) => a + b, 0) },
-    { name: '开源仓库', count: (toolData?.zreadMcpCount ?? []).reduce((a, b) => a + b, 0) },
+    { name: "联网搜索", count: (toolData?.networkSearchCount ?? []).reduce((a, b) => a + b, 0) },
+    { name: "网页读取", count: (toolData?.webReadMcpCount ?? []).reduce((a, b) => a + b, 0) },
+    { name: "开源仓库", count: (toolData?.zreadMcpCount ?? []).reduce((a, b) => a + b, 0) },
   ];
 
   return {
@@ -223,12 +228,12 @@ export async function getUsage() {
       // and mark them stale so the kiosk shows a visible warning instead.
       const previous = cache.data;
       const data = {
-        ...(previous ?? { level: '', fiveHour: null, weekly: null, mcp: null, usage: null }),
+        ...(previous ?? { level: "", fiveHour: null, weekly: null, mcp: null, usage: null }),
         ok: false,
         stale: true,
         error: err.message,
-        fetchedAt: previous?.fetchedAt ?? '—',
-        fetchedDate: previous?.fetchedDate ?? '',
+        fetchedAt: previous?.fetchedAt ?? "—",
+        fetchedDate: previous?.fetchedDate ?? "",
       };
       if (previous) cache = { at: Date.now(), data };
       return data;
@@ -243,48 +248,50 @@ export async function getUsage() {
 /** id -> text pairs consumed by the client-side 60s updater. */
 export function toDom(data) {
   const texts = {
-    'fetched-at': data.fetchedAt,
-    level: data.level || '—',
-    'health-mark': data.ok ? '正常' : '⚠ 数据陈旧',
+    "fetched-at": data.fetchedAt,
+    level: data.level || "—",
+    "health-mark": data.ok ? "正常" : "⚠ 数据陈旧",
     // Tab-rail preview: 5-hour quota only, nothing else belongs in the rail.
-    'p-glm-used': '—',
-    'p-glm-remain': '—',
-    'p-glm-reset': '—',
+    "p-glm-used": "—",
+    "p-glm-remain": "—",
+    "p-glm-reset": "—",
   };
   const bars = {};
 
   if (data.fiveHour) {
-    texts['fh-pct'] = String(data.fiveHour.pct);
-    texts['fh-remain'] = String(data.fiveHour.remainPct);
-    texts['fh-reset-in'] = data.fiveHour.resetIn ? `${data.fiveHour.resetIn} 后重置` : '重置时间未知';
-    texts['fh-reset-at'] = data.fiveHour.resetAt;
-    bars['fh-bar'] = data.fiveHour.bar;
-    texts['p-glm-used'] = String(data.fiveHour.pct);
-    texts['p-glm-remain'] = String(data.fiveHour.remainPct);
-    texts['p-glm-reset'] = data.fiveHour.resetIn || data.fiveHour.resetAt;
+    texts["fh-pct"] = String(data.fiveHour.pct);
+    texts["fh-remain"] = String(data.fiveHour.remainPct);
+    texts["fh-reset-in"] = data.fiveHour.resetIn
+      ? `${data.fiveHour.resetIn} 后重置`
+      : "重置时间未知";
+    texts["fh-reset-at"] = data.fiveHour.resetAt;
+    bars["fh-bar"] = data.fiveHour.bar;
+    texts["p-glm-used"] = String(data.fiveHour.pct);
+    texts["p-glm-remain"] = String(data.fiveHour.remainPct);
+    texts["p-glm-reset"] = data.fiveHour.resetIn || data.fiveHour.resetAt;
   }
   if (data.weekly) {
-    texts['wk-pct'] = String(data.weekly.pct);
-    texts['wk-remain'] = String(data.weekly.remainPct);
-    texts['wk-reset-in'] = data.weekly.resetIn ? `${data.weekly.resetIn} 后重置` : '重置时间未知';
-    bars['wk-bar'] = data.weekly.bar;
+    texts["wk-pct"] = String(data.weekly.pct);
+    texts["wk-remain"] = String(data.weekly.remainPct);
+    texts["wk-reset-in"] = data.weekly.resetIn ? `${data.weekly.resetIn} 后重置` : "重置时间未知";
+    bars["wk-bar"] = data.weekly.bar;
   }
   if (data.mcp) {
-    texts['mcp-used'] = fmtInt(data.mcp.used);
-    texts['mcp-total'] = fmtInt(data.mcp.total);
-    texts['mcp-remain'] = fmtInt(data.mcp.remain);
-    texts['mcp-pct'] = String(data.mcp.pct);
-    texts['mcp-reset-at'] = data.mcp.resetAt;
-    texts['mcp-reset-in'] = data.mcp.resetIn;
-    bars['mcp-bar'] = data.mcp.bar;
+    texts["mcp-used"] = fmtInt(data.mcp.used);
+    texts["mcp-total"] = fmtInt(data.mcp.total);
+    texts["mcp-remain"] = fmtInt(data.mcp.remain);
+    texts["mcp-pct"] = String(data.mcp.pct);
+    texts["mcp-reset-at"] = data.mcp.resetAt;
+    texts["mcp-reset-in"] = data.mcp.resetIn;
+    bars["mcp-bar"] = data.mcp.bar;
     data.mcp.details.forEach((d, i) => {
       texts[`mcp-d${i}-name`] = d.name;
       texts[`mcp-d${i}-usage`] = fmtInt(d.usage);
     });
   }
   if (data.usage) {
-    texts['us-calls'] = fmtInt(data.usage.calls);
-    texts['us-tokens'] = fmtTokens(data.usage.tokens);
+    texts["us-calls"] = fmtInt(data.usage.calls);
+    texts["us-tokens"] = fmtTokens(data.usage.tokens);
     data.usage.models.forEach((m, i) => {
       texts[`us-m${i}-name`] = m.name;
       texts[`us-m${i}-tokens`] = fmtTokens(m.tokens);

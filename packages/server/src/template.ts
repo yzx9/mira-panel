@@ -4,11 +4,11 @@
 // Marker presence is asserted at boot so a vite upgrade that strips HTML
 // comments fails loudly instead of shipping pages without state.
 
-import type { PanelState, TabId } from '@mira-panel/shared';
+import type { PanelState, TabId } from "@mira-panel/shared";
 
-export const MARKER_TITLE = '<!--title-->';
-export const MARKER_APP_HTML = '<!--app-html-->';
-export const MARKER_STATE = '<!--state-->';
+export const MARKER_TITLE = "<!--title-->";
+export const MARKER_APP_HTML = "<!--app-html-->";
+export const MARKER_STATE = "<!--state-->";
 
 export function assertMarkers(shell: string): void {
   for (const marker of [MARKER_TITLE, MARKER_APP_HTML, MARKER_STATE]) {
@@ -23,7 +23,7 @@ export interface PageSlots {
 }
 
 export function tabTitle(tab: TabId): string {
-  return tab === 'vikunja' ? 'Mira Monitor · Vikunja' : 'Mira Monitor · GLM 用量';
+  return tab === "vikunja" ? "Mira Monitor · Vikunja" : "Mira Monitor · GLM 用量";
 }
 
 /** Replace the markers. Each replacement goes through a function so `$`
@@ -31,7 +31,7 @@ export function tabTitle(tab: TabId): string {
  *  bootstrap JSON escapes `<` so a state value can never close the script
  *  tag from inside the application/json block. */
 export function assemble(shell: string, slots: PageSlots): string {
-  const json = JSON.stringify(slots.bootstrap).replace(/</g, '\\u003c');
+  const json = JSON.stringify(slots.bootstrap).replace(/</g, "\\u003c");
   return shell
     .replace(MARKER_TITLE, () => slots.title)
     .replace(MARKER_APP_HTML, () => slots.appHtml)

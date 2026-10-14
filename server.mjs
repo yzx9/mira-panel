@@ -18,19 +18,19 @@
 // Usage:  node server.mjs            (binds 0.0.0.0:15932)
 //         PORT=8080 node server.mjs  (override)
 
-import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { dirname, extname, join, normalize, resolve } from 'node:path';
+import { createServer } from "node:http";
+import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 
-import { getUsage, toDom } from './usage.mjs';
-import { getTasks, tasksSignature, tasksTexts } from './vikunja.mjs';
-import { renderPage } from './render.mjs';
+import { getUsage, toDom } from "./usage.mjs";
+import { getTasks, tasksSignature, tasksTexts } from "./vikunja.mjs";
+import { renderPage } from "./render.mjs";
 
-const HOST = process.env.HOST ?? '0.0.0.0';
+const HOST = process.env.HOST ?? "0.0.0.0";
 const PORT = Number(process.env.PORT ?? 15932);
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), 'public');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "public");
 
 // Build id for the running code. The panel compares it on every 60s poll and
 // reloads itself when it changes, so a deploy reaches the kiosk unattended.
@@ -39,38 +39,38 @@ const BUILD = await computeBuild();
 async function computeBuild() {
   const here = dirname(fileURLToPath(import.meta.url));
   const parts = await Promise.all(
-    ['server.mjs', 'usage.mjs', 'render.mjs', 'vikunja.mjs'].map(async (name) => {
+    ["server.mjs", "usage.mjs", "render.mjs", "vikunja.mjs"].map(async (name) => {
       const info = await stat(join(here, name));
       return `${name}:${info.size}:${Math.round(info.mtimeMs)}`;
     }),
   );
-  return createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 8);
+  return createHash("sha1").update(parts.join("|")).digest("hex").slice(0, 8);
 }
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.txt': 'text/plain; charset=utf-8',
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 /** Map a request path to a file inside ROOT, refusing path traversal. */
 function resolvePath(urlPath) {
-  const decoded = decodeURIComponent(urlPath.split('?')[0]);
-  const rel = normalize(decoded).replace(/^(\.\.[/\\])+/, '');
+  const decoded = decodeURIComponent(urlPath.split("?")[0]);
+  const rel = normalize(decoded).replace(/^(\.\.[/\\])+/, "");
   const abs = join(ROOT, rel);
   return abs.startsWith(ROOT) ? abs : null;
 }
 
 function send(res, code, body, headers = {}) {
   res.writeHead(code, {
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
     ...headers,
   });
   res.end(body);
@@ -78,9 +78,9 @@ function send(res, code, body, headers = {}) {
 
 function sendJson(res, req, payload) {
   const body = JSON.stringify(payload);
-  return send(res, 200, req.method === 'HEAD' ? '' : body, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
+  return send(res, 200, req.method === "HEAD" ? "" : body, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
   });
 }
 
@@ -90,10 +90,10 @@ function sendJson(res, req, payload) {
 let lastClient = null;
 
 function noteClientViewport(q) {
-  const vw = Number(q.get('vw'));
-  const vh = Number(q.get('vh'));
+  const vw = Number(q.get("vw"));
+  const vh = Number(q.get("vh"));
   if (!vw || !vh) return;
-  const dpr = Number(q.get('dpr')) || 1;
+  const dpr = Number(q.get("dpr")) || 1;
   const stamp = `${vw}x${vh} @${dpr}x`;
   if (lastClient?.stamp === stamp) return;
   lastClient = { stamp, at: new Date().toISOString().slice(11, 19) };
@@ -103,7 +103,7 @@ function noteClientViewport(q) {
 
 /** Structural GLM bits that cannot be patched as text -> part of the page signature. */
 function glmSignature(glm) {
-  return createHash('sha1')
+  return createHash("sha1")
     .update(
       JSON.stringify({
         level: glm.level,
@@ -114,7 +114,7 @@ function glmSignature(glm) {
         hours: glm.usage?.hourlyTokens?.length ?? 0,
       }),
     )
-    .digest('hex')
+    .digest("hex")
     .slice(0, 8);
 }
 
@@ -123,12 +123,12 @@ async function stateFor(tab) {
   const [glm, tasks] = await Promise.all([getUsage(), getTasks()]);
   const glmDom = toDom(glm);
   const tasksDom = { texts: tasksTexts(tasks) };
-  const vikunja = tab === 'vikunja';
+  const vikunja = tab === "vikunja";
 
   const texts = { ...glmDom.texts, ...tasksDom.texts };
-  texts['fetched-at'] = vikunja ? tasks.fetchedAt : glm.fetchedAt;
-  texts['health-mark'] = vikunja ? (tasks.ok ? '正常' : '⚠ 数据陈旧') : glmDom.texts['health-mark'];
-  texts['head-count'] = String(tasks.counts?.open ?? '—');
+  texts["fetched-at"] = vikunja ? tasks.fetchedAt : glm.fetchedAt;
+  texts["health-mark"] = vikunja ? (tasks.ok ? "正常" : "⚠ 数据陈旧") : glmDom.texts["health-mark"];
+  texts["head-count"] = String(tasks.counts?.open ?? "—");
 
   const active = vikunja ? tasks : glm;
   return {
@@ -147,33 +147,33 @@ async function stateFor(tab) {
 }
 
 const server = createServer(async (req, res) => {
-  const path = (req.url ?? '/').split('?')[0];
+  const path = (req.url ?? "/").split("?")[0];
 
   try {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      return send(res, 405, 'Method Not Allowed', { 'Content-Type': 'text/plain' });
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return send(res, 405, "Method Not Allowed", { "Content-Type": "text/plain" });
     }
 
     // Tiny health probe for curl / watchdogs — no filesystem or API access.
-    if (path === '/healthz') {
-      return send(res, 200, 'ok\n', { 'Content-Type': 'text/plain' });
+    if (path === "/healthz") {
+      return send(res, 200, "ok\n", { "Content-Type": "text/plain" });
     }
 
     // Panel pages: one tab = one URL = one SSR pass. No client-side routing,
     // so a tab switch is a normal navigation the e-paper repaints anyway.
-    if (path === '/' || path === '/glm' || path === '/index.html' || path === '/vikunja') {
-      const state = await stateFor(path === '/vikunja' ? 'vikunja' : 'glm');
+    if (path === "/" || path === "/glm" || path === "/index.html" || path === "/vikunja") {
+      const state = await stateFor(path === "/vikunja" ? "vikunja" : "glm");
       const html = renderPage(state);
-      return send(res, 200, req.method === 'HEAD' ? '' : html, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Content-Length': Buffer.byteLength(html),
+      return send(res, 200, req.method === "HEAD" ? "" : html, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Length": Buffer.byteLength(html),
       });
     }
 
     // What the 60s client poll patches text nodes from (kept lean on purpose).
-    if (path === '/api/state' || path === '/api/usage') {
-      const q = new URL(req.url, 'http://localhost').searchParams;
-      const tab = q.get('tab') === 'vikunja' ? 'vikunja' : 'glm';
+    if (path === "/api/state" || path === "/api/usage") {
+      const q = new URL(req.url, "http://localhost").searchParams;
+      const tab = q.get("tab") === "vikunja" ? "vikunja" : "glm";
       noteClientViewport(q);
       const state = await stateFor(tab);
       return sendJson(res, req, {
@@ -187,27 +187,29 @@ const server = createServer(async (req, res) => {
     }
 
     // Debug view: full normalised payload for both sources + client viewport.
-    if (path === '/api/raw') {
-      const state = await stateFor('glm');
+    if (path === "/api/raw") {
+      const state = await stateFor("glm");
       return sendJson(res, req, { glm: state.glm, tasks: state.tasks, client: lastClient });
     }
 
     const file = resolvePath(path);
-    if (!file) return send(res, 400, 'Bad Request', { 'Content-Type': 'text/plain' });
+    if (!file) return send(res, 400, "Bad Request", { "Content-Type": "text/plain" });
 
     const info = await stat(file).catch(() => null);
     if (!info || !info.isFile()) {
-      return send(res, 404, 'Not Found', { 'Content-Type': 'text/plain' });
+      return send(res, 404, "Not Found", { "Content-Type": "text/plain" });
     }
 
     const body = await readFile(file);
-    return send(res, 200, req.method === 'HEAD' ? '' : body, {
-      'Content-Type': MIME[extname(file)] ?? 'application/octet-stream',
-      'Content-Length': body.length,
+    return send(res, 200, req.method === "HEAD" ? "" : body, {
+      "Content-Type": MIME[extname(file)] ?? "application/octet-stream",
+      "Content-Length": body.length,
     });
   } catch (err) {
-    process.stderr.write(`[mira-panel] ${req.method} ${req.url} failed: ${err.stack ?? err.message}\n`);
-    return send(res, 500, 'Internal Server Error', { 'Content-Type': 'text/plain' });
+    process.stderr.write(
+      `[mira-panel] ${req.method} ${req.url} failed: ${err.stack ?? err.message}\n`,
+    );
+    return send(res, 500, "Internal Server Error", { "Content-Type": "text/plain" });
   }
 });
 

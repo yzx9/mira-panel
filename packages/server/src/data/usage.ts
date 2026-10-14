@@ -22,16 +22,16 @@
 // render/poll time from (resetMs, state.now) via the shared formatters, which
 // keeps hydration exact and countdowns no older than the last fetch.
 
-import { execFile } from 'node:child_process';
-import { readFile, realpath } from 'node:fs/promises';
-import { promisify } from 'node:util';
+import { execFile } from "node:child_process";
+import { readFile, realpath } from "node:fs/promises";
+import { promisify } from "node:util";
 
-import { fmtDate, fmtTime } from '@mira-panel/shared';
-import type { McpDetail, ModelUsage, ToolCall } from '@mira-panel/shared';
+import { fmtDate, fmtTime } from "@mira-panel/shared";
+import type { McpDetail, ModelUsage, ToolCall } from "@mira-panel/shared";
 
 const execFileAsync = promisify(execFile);
 
-const CLAUDE_WRAPPER = '/etc/profiles/per-user/yzx9/bin/claude';
+const CLAUDE_WRAPPER = "/etc/profiles/per-user/yzx9/bin/claude";
 const SETTINGS_RE = /\/nix\/store\/[^"'\s]*claude-code-glm-settings\.json/;
 
 const CRED_TTL_MS = 10 * 60 * 1000; // key/host rarely change
@@ -140,11 +140,11 @@ async function credentials(): Promise<Credentials> {
   if (cred && Date.now() - cred.at < CRED_TTL_MS) return cred;
 
   const wrapper = await realpath(CLAUDE_WRAPPER);
-  const wrapperText = await readFile(wrapper, 'utf8');
+  const wrapperText = await readFile(wrapper, "utf8");
   const settingsPath = wrapperText.match(SETTINGS_RE)?.[0];
   if (!settingsPath) throw new Error(`no claude-code-glm-settings.json referenced by ${wrapper}`);
 
-  const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as {
+  const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
     env?: { ANTHROPIC_BASE_URL?: string };
     apiKeyHelper?: string;
   };
@@ -165,8 +165,8 @@ async function getJson<T>(url: string, key: string): Promise<T> {
   const res = await fetch(url, {
     headers: {
       Authorization: key, // raw key: no Bearer prefix
-      'Accept-Language': 'zh-CN,zh',
-      Accept: 'application/json',
+      "Accept-Language": "zh-CN,zh",
+      Accept: "application/json",
     },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -178,7 +178,10 @@ async function getJson<T>(url: string, key: string): Promise<T> {
     msg?: string;
     data?: T;
   };
-  if (json.success === false || (json.code !== undefined && json.code !== null && json.code !== 200)) {
+  if (
+    json.success === false ||
+    (json.code !== undefined && json.code !== null && json.code !== 200)
+  ) {
     throw new Error(`API code ${String(json.code)}: ${String(json.msg ?? text.slice(0, 200))}`);
   }
   return (json.data ?? (json as unknown)) as T;
@@ -186,7 +189,7 @@ async function getJson<T>(url: string, key: string): Promise<T> {
 
 // ---------------------------------------------------------------- fetching
 
-const two = (n: number): string => String(n).padStart(2, '0');
+const two = (n: number): string => String(n).padStart(2, "0");
 
 function windowParams(): string {
   const now = new Date();
@@ -201,37 +204,42 @@ function windowParams(): string {
 
 /** Epoch ms of the next reset, or null when the API did not give one. */
 function toResetMs(v: unknown): number | null {
-  const n = typeof v === 'number' ? v : Number(v);
+  const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-function normaliseQuota(data: QuotaResponse | null): Pick<GlmData, 'level' | 'fiveHour' | 'weekly' | 'mcp'> {
+function normaliseQuota(
+  data: QuotaResponse | null,
+): Pick<GlmData, "level" | "fiveHour" | "weekly" | "mcp"> {
   const limits = data?.limits ?? [];
   const find = (type: string, unit?: number, num?: number) =>
     limits.find(
-      (l) => l.type === type && (unit === undefined || l.unit === unit) && (num === undefined || l.number === num),
+      (l) =>
+        l.type === type &&
+        (unit === undefined || l.unit === unit) &&
+        (num === undefined || l.number === num),
     );
 
-  const out: Pick<GlmData, 'level' | 'fiveHour' | 'weekly' | 'mcp'> = {
-    level: (data?.level ?? '').toUpperCase(),
+  const out: Pick<GlmData, "level" | "fiveHour" | "weekly" | "mcp"> = {
+    level: (data?.level ?? "").toUpperCase(),
     fiveHour: null,
     weekly: null,
     mcp: null,
   };
 
-  const five = find('TOKENS_LIMIT', 3, 5) ?? find('TOKENS_LIMIT', 3);
+  const five = find("TOKENS_LIMIT", 3, 5) ?? find("TOKENS_LIMIT", 3);
   if (five) {
     const pct = Math.round(five.percentage ?? 0);
     out.fiveHour = { pct, remainPct: 100 - pct, bar: pct, resetMs: toResetMs(five.nextResetTime) };
   }
 
-  const week = find('TOKENS_LIMIT', 6);
+  const week = find("TOKENS_LIMIT", 6);
   if (week) {
     const pct = Math.round(week.percentage ?? 0);
     out.weekly = { pct, remainPct: 100 - pct, bar: pct, resetMs: toResetMs(week.nextResetTime) };
   }
 
-  const mcp = find('TIME_LIMIT', 5, 1) ?? find('TIME_LIMIT', 5);
+  const mcp = find("TIME_LIMIT", 5, 1) ?? find("TIME_LIMIT", 5);
   if (mcp) {
     const used = mcp.currentValue ?? 0;
     const total = mcp.usage ?? 100;
@@ -249,16 +257,19 @@ function normaliseQuota(data: QuotaResponse | null): Pick<GlmData, 'level' | 'fi
   return out;
 }
 
-function normaliseUsage(modelData: ModelUsageResponse | null, toolData: ToolUsageResponse | null): UsageRaw {
+function normaliseUsage(
+  modelData: ModelUsageResponse | null,
+  toolData: ToolUsageResponse | null,
+): UsageRaw {
   const totals = modelData?.totalUsage ?? {};
   const summary = totals.modelSummaryList ?? modelData?.modelSummaryList ?? [];
   const hourTokens = modelData?.tokensUsage ?? [];
   const hourCalls = modelData?.modelCallCount ?? [];
 
   const tools: ToolCall[] = [
-    { name: '联网搜索', count: (toolData?.networkSearchCount ?? []).reduce((a, b) => a + b, 0) },
-    { name: '网页读取', count: (toolData?.webReadMcpCount ?? []).reduce((a, b) => a + b, 0) },
-    { name: '开源仓库', count: (toolData?.zreadMcpCount ?? []).reduce((a, b) => a + b, 0) },
+    { name: "联网搜索", count: (toolData?.networkSearchCount ?? []).reduce((a, b) => a + b, 0) },
+    { name: "网页读取", count: (toolData?.webReadMcpCount ?? []).reduce((a, b) => a + b, 0) },
+    { name: "开源仓库", count: (toolData?.zreadMcpCount ?? []).reduce((a, b) => a + b, 0) },
   ];
 
   return {
@@ -303,12 +314,12 @@ export async function getUsage(): Promise<GlmData> {
       // numbers and mark them stale so the kiosk shows a visible warning.
       const previous = cache.data;
       const data: GlmData = {
-        ...(previous ?? { level: '', fiveHour: null, weekly: null, mcp: null, usage: null }),
+        ...(previous ?? { level: "", fiveHour: null, weekly: null, mcp: null, usage: null }),
         ok: false,
         stale: true,
         error: err instanceof Error ? err.message : String(err),
-        fetchedAt: previous?.fetchedAt ?? '—',
-        fetchedDate: previous?.fetchedDate ?? '',
+        fetchedAt: previous?.fetchedAt ?? "—",
+        fetchedDate: previous?.fetchedDate ?? "",
       };
       if (previous) cache = { at: Date.now(), data };
       return data;

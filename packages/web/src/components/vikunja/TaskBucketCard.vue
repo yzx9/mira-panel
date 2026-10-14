@@ -1,14 +1,16 @@
 <script setup vapor lang="ts">
 // One Vikunja bucket: the header count is the FULL count, the table shows the
 // server-capped rows, `more` notes what was cut off (old taskRows behavior).
-import type { Bucket } from '@mira-panel/shared';
+import type { Bucket } from "@mira-panel/shared";
 
 defineProps<{ title: string; count: number; bucket: Bucket }>();
 </script>
 
 <template>
   <section class="card">
-    <h2>{{ title }} <span class="tag">{{ count }} 项</span></h2>
+    <h2>
+      {{ title }} <span class="tag">{{ count }} 项</span>
+    </h2>
     <div v-if="bucket.rows.length === 0" class="empty">暂无</div>
     <template v-else>
       <table class="rows">

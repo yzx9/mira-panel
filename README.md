@@ -31,25 +31,25 @@ Vikunja│ /vikunja 今日到期、未来 7 天、逾期、汇总（未完成 / 
 
 Node 24 内置模块，**零依赖、零构建、零 npm**。首屏全部服务端渲染，树莓派只下载一个 HTML。
 
-| 文件 | 说明 |
-| --- | --- |
-| `server.mjs` | 路由、build/signature 计算、`/api/state` 载荷组装 |
-| `usage.mjs` | GLM 数据层：nix 链解析 API key → 3 个 monitor 接口 → 归一化 + 缓存 25s |
-| `vikunja.mjs` | Vikunja 数据层：token 解析 → 一次筛选查询 → 本地分桶 + 缓存 45s |
-| `render.mjs` | navbar / rail / 各 tab 详情的 SSR 模板 + 60 秒增量更新脚本 |
-| `public/draft.html` | v0 布局草案（假数据），留作对比 |
+| 文件                | 说明                                                                   |
+| ------------------- | ---------------------------------------------------------------------- |
+| `server.mjs`        | 路由、build/signature 计算、`/api/state` 载荷组装                      |
+| `usage.mjs`         | GLM 数据层：nix 链解析 API key → 3 个 monitor 接口 → 归一化 + 缓存 25s |
+| `vikunja.mjs`       | Vikunja 数据层：token 解析 → 一次筛选查询 → 本地分桶 + 缓存 45s        |
+| `render.mjs`        | navbar / rail / 各 tab 详情的 SSR 模板 + 60 秒增量更新脚本             |
+| `public/draft.html` | v0 布局草案（假数据），留作对比                                        |
 
 ### 路由
 
-| 路径 | 作用 |
-| --- | --- |
-| `/`、`/glm` | GLM 面板（SSR） |
-| `/vikunja` | Vikunja 面板（SSR） |
+| 路径                          | 作用                                                                |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `/`、`/glm`                   | GLM 面板（SSR）                                                     |
+| `/vikunja`                    | Vikunja 面板（SSR）                                                 |
 | `/api/state?tab=glm\|vikunja` | 60 秒轮询用的瘦载荷 `{build, signature, texts, bars, stale, error}` |
-| `/api/usage` | `/api/state?tab=glm` 的别名（兼容旧链接） |
-| `/api/raw` | 两个数据源的完整归一化结果（调试用） |
-| `/healthz` | `ok` |
-| `/<file>` | `public/` 静态文件 |
+| `/api/usage`                  | `/api/state?tab=glm` 的别名（兼容旧链接）                           |
+| `/api/raw`                    | 两个数据源的完整归一化结果（调试用）                                |
+| `/healthz`                    | `ok`                                                                |
+| `/<file>`                     | `public/` 静态文件                                                  |
 
 ## 运行
 

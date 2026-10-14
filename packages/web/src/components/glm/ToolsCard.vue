@@ -1,6 +1,6 @@
 <script setup vapor lang="ts">
-import { fmtInt } from '@mira-panel/shared';
-import type { UsageSummary } from '@mira-panel/shared';
+import { fmtInt } from "@mira-panel/shared";
+import type { UsageSummary } from "@mira-panel/shared";
 
 defineProps<{ usage: UsageSummary }>();
 </script>

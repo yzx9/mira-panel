@@ -2,11 +2,11 @@
 // Every display string is produced here so the SSR pass and the 60s poll always
 // agree byte-for-byte (which is what hydration requires).
 
-const two = (n: number): string => String(n).padStart(2, '0')
+const two = (n: number): string => String(n).padStart(2, "0");
 
-export const fmtTime = (d: Date): string => `${two(d.getHours())}:${two(d.getMinutes())}`
+export const fmtTime = (d: Date): string => `${two(d.getHours())}:${two(d.getMinutes())}`;
 
-export const fmtDate = (d: Date): string => `${d.getMonth() + 1}-${two(d.getDate())}`
+export const fmtDate = (d: Date): string => `${d.getMonth() + 1}-${two(d.getDate())}`;
 
 /** 7_200_000 -> "2小时"; 3d5h -> "3天 5小时"; negative input clamps at 0. */
 export function fmtCountdown(ms: number): string {
@@ -21,27 +21,27 @@ export function fmtCountdown(ms: number): string {
 
 /** 1_000_479_997 -> "10.0亿"; keeps the panel narrow and stable-width. */
 export function fmtTokens(n: number): string {
-  if (!Number.isFinite(n)) return '—';
+  if (!Number.isFinite(n)) return "—";
   if (n >= 1e8) return `${(n / 1e8).toFixed(n >= 1e9 ? 1 : 2)}亿`;
   if (n >= 1e4) return `${(n / 1e4).toFixed(1)}万`;
   return String(n);
 }
 
 /** Locale is pinned: bare toLocaleString() drifts between Node and Firefox. */
-export const fmtInt = (n: number): string => (Number.isFinite(n) ? n.toLocaleString('en-US') : '—');
+export const fmtInt = (n: number): string => (Number.isFinite(n) ? n.toLocaleString("en-US") : "—");
 
 /** Reset moment: "HH:MM" within 24h, "M-DD HH:MM" beyond, "未知" when absent. */
 export function resetAtText(resetMs: number | null, now: number): string {
-  if (resetMs === null || !Number.isFinite(resetMs)) return '未知';
+  if (resetMs === null || !Number.isFinite(resetMs)) return "未知";
   const d = new Date(resetMs);
   return (resetMs - now) / 3_600_000 > 24 ? `${fmtDate(d)} ${fmtTime(d)}` : fmtTime(d);
 }
 
 /** Reset countdown with suffix: "2小时 3分 后重置" / "重置时间未知". */
 export function resetInText(resetMs: number | null, now: number): string {
-  if (resetMs === null || !Number.isFinite(resetMs)) return '重置时间未知';
+  if (resetMs === null || !Number.isFinite(resetMs)) return "重置时间未知";
   return `${fmtCountdown(resetMs - now)} 后重置`;
 }
 
 /** Navbar health slot; the client may override it with a transient flash. */
-export const healthText = (ok: boolean): string => (ok ? '正常' : '⚠ 数据陈旧');
+export const healthText = (ok: boolean): string => (ok ? "正常" : "⚠ 数据陈旧");

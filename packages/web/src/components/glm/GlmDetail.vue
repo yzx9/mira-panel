@@ -2,12 +2,12 @@
 // GLM tab body: hero + MCP + usage + tools + weekly/status, each with the old
 // hide-missing-pool behavior (an absent quota item renders a labelled empty
 // card, never a blank frame).
-import type { GlmState } from '@mira-panel/shared';
-import HeroCard from './HeroCard.vue';
-import McpCard from './McpCard.vue';
-import ModelUsageCard from './ModelUsageCard.vue';
-import ToolsCard from './ToolsCard.vue';
-import WeeklyOrStatusCard from './WeeklyOrStatusCard.vue';
+import type { GlmState } from "@mira-panel/shared";
+import HeroCard from "./HeroCard.vue";
+import McpCard from "./McpCard.vue";
+import ModelUsageCard from "./ModelUsageCard.vue";
+import ToolsCard from "./ToolsCard.vue";
+import WeeklyOrStatusCard from "./WeeklyOrStatusCard.vue";
 
 defineProps<{ glm: GlmState; now: number }>();
 </script>

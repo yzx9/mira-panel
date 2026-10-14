@@ -13,15 +13,17 @@ import {
   type PanelState,
   type TaskRow,
   type VikunjaState,
-} from '@mira-panel/shared';
+} from "@mira-panel/shared";
 
-import { getUsage, type GlmData } from './data/usage.ts';
-import { getTasks, type TaskRaw, type VikunjaData } from './data/vikunja.ts';
+import { getUsage, type GlmData } from "./data/usage.ts";
+import { getTasks, type TaskRaw, type VikunjaData } from "./data/vikunja.ts";
 
 /** Cap a bucket to its visible rows; `more` counts what was cut off. */
 function capRows(rows: TaskRaw[], cap: number): Bucket {
   return {
-    rows: rows.slice(0, cap).map((t): TaskRow => ({ id: t.id, title: t.title, project: t.project, when: t.when })),
+    rows: rows
+      .slice(0, cap)
+      .map((t): TaskRow => ({ id: t.id, title: t.title, project: t.project, when: t.when })),
     more: Math.max(0, rows.length - cap),
   };
 }

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<meta name="theme-color" content="#ffffff">
+<title><!--title--></title>
+<script>
+/* Size the fixed design canvas (2200x1650) to the real viewport before first
+   paint, so the panel never flashes at the wrong scale; resize keeps it in
+   sync. Ported verbatim from the previous render.mjs. */
+(function () {
+  function fit() {
+    var s = Math.min(window.innerWidth / 2200, window.innerHeight / 1650);
+    document.documentElement.style.setProperty('--fit', s);
+  }
+  fit();
+  window.addEventListener('resize', fit);
+})();
+</script>
+<!-- The stylesheet is a plain <link>, NOT a JS import: with JavaScript off
+     the page must still be readable AND styled (SSR-first contract). Vite
+     rewrites it to the hashed asset in the prod build. -->
+<link rel="stylesheet" href="/src/styles/epaper.css">
+<script type="module" src="/src/entry-client.ts"></script>
+</head>
+<body>
+<!-- .viewport/.screen stay outside Vue: the hydrate root is #app itself, so
+     <header> and .body land as DIRECT children of the .screen grid (App.vue
+     is a two-root fragment on purpose). -->
+<div class="viewport"><div id="app" class="screen"><!--app-html--></div></div>
+<!-- Bootstrap state: the exact PanelState the SSR pass consumed. -->
+<script type="application/json" id="panel-state"><!--state--></script>
+</body>
+</html>

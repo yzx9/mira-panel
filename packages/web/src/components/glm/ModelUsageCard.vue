@@ -12,10 +12,12 @@ defineProps<{ usage: UsageSummary }>();
       <span>{{ fmtInt(usage.calls) }}</span><span class="small"> 次调用 ・ <b>{{ fmtTokens(usage.tokens) }}</b> tokens</span>
     </div>
     <table class="rows">
-      <tr v-for="m in usage.models" :key="m.name">
-        <td>{{ m.name }}</td>
-        <td class="num">{{ fmtTokens(m.tokens) }}</td>
-      </tr>
+      <tbody>
+        <tr v-for="m in usage.models" :key="m.name">
+          <td>{{ m.name }}</td>
+          <td class="num">{{ fmtTokens(m.tokens) }}</td>
+        </tr>
+      </tbody>
     </table>
   </section>
 </template>

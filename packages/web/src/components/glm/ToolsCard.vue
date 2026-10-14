@@ -9,10 +9,12 @@ defineProps<{ usage: UsageSummary }>();
   <section class="card">
     <h2>工具调用 <span class="tag">今天</span></h2>
     <table class="rows big-rows">
-      <tr v-for="t in usage.tools" :key="t.name">
-        <td>{{ t.name }}</td>
-        <td class="num">{{ fmtInt(t.count) }}</td>
-      </tr>
+      <tbody>
+        <tr v-for="t in usage.tools" :key="t.name">
+          <td>{{ t.name }}</td>
+          <td class="num">{{ fmtInt(t.count) }}</td>
+        </tr>
+      </tbody>
     </table>
   </section>
 </template>

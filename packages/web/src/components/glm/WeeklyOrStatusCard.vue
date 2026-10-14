@@ -31,9 +31,14 @@ const statusReset = computed(() => {
   <section v-else class="card">
     <h2>状态</h2>
     <table class="rows">
-      <tr><td>套餐</td><td class="num">{{ statusLevel }}</td></tr>
-      <tr><td>更新于</td><td class="num">{{ statusFetched }}</td></tr>
-      <tr><td>5 小时重置</td><td class="num">{{ statusReset }}</td></tr>
+      <!-- Explicit tbody: bare static <tr>s get an implicit tbody from the
+           HTML parser, which vapor hydration then mis-claims (the row texts
+           leaked out of the card in testing). -->
+      <tbody>
+        <tr><td>套餐</td><td class="num">{{ statusLevel }}</td></tr>
+        <tr><td>更新于</td><td class="num">{{ statusFetched }}</td></tr>
+        <tr><td>5 小时重置</td><td class="num">{{ statusReset }}</td></tr>
+      </tbody>
     </table>
   </section>
 </template>

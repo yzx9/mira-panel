@@ -23,10 +23,14 @@ const resetAt = computed(() => resetAtText(props.mcp.resetMs, props.now));
       已用 <b>{{ mcp.pct }}</b>% ・ 剩余 <b>{{ fmtInt(mcp.remain) }}</b> ・ <span>{{ resetAt }}</span> 重置
     </div>
     <table class="rows">
-      <tr v-for="d in mcp.details" :key="d.name">
-        <td>{{ d.name }}</td>
-        <td class="num">{{ fmtInt(d.usage) }}</td>
-      </tr>
+      <!-- Explicit tbody: vapor's v-for fragment anchors must live inside a
+           table section, or the parser's implicit tbody breaks hydration. -->
+      <tbody>
+        <tr v-for="d in mcp.details" :key="d.name">
+          <td>{{ d.name }}</td>
+          <td class="num">{{ fmtInt(d.usage) }}</td>
+        </tr>
+      </tbody>
     </table>
   </section>
 </template>

@@ -13,7 +13,7 @@ import { computeBuildId } from './buildId.ts';
 import { assemble, assertMarkers, tabTitle } from './template.ts';
 import { lastViewport } from './viewport.ts';
 
-const REPO_ROOT = join(import.meta.dirname, '../..');
+const REPO_ROOT = join(import.meta.dirname, '../../..');
 const WEB_ROOT = join(REPO_ROOT, 'packages/web');
 const SHELL_PATH = join(WEB_ROOT, 'index.html');
 

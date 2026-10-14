@@ -12,11 +12,15 @@ defineProps<{ title: string; count: number; bucket: Bucket }>();
     <div v-if="bucket.rows.length === 0" class="empty">暂无</div>
     <template v-else>
       <table class="rows">
-        <tr v-for="t in bucket.rows" :key="t.id">
-          <td class="title">{{ t.title }}</td>
-          <td class="proj">{{ t.project }}</td>
-          <td class="num">{{ t.when }}</td>
-        </tr>
+        <!-- Explicit tbody: see McpCard — keeps vapor's v-for anchors inside
+             a table section so hydration owns the right range. -->
+        <tbody>
+          <tr v-for="t in bucket.rows" :key="t.id">
+            <td class="title">{{ t.title }}</td>
+            <td class="proj">{{ t.project }}</td>
+            <td class="num">{{ t.when }}</td>
+          </tr>
+        </tbody>
       </table>
       <div v-if="bucket.more > 0" class="more">另有 {{ bucket.more }} 项</div>
     </template>

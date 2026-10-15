@@ -19,7 +19,7 @@ export function assertMarkers(shell: string): void {
 export interface PageSlots {
   title: string;
   appHtml: string;
-  bootstrap: { tab: TabId; state: PanelState };
+  bootstrap: { tab: TabId; state: PanelState; locked: boolean };
 }
 
 export function tabTitle(tab: TabId): string {

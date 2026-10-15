@@ -14,7 +14,15 @@ const props = defineProps<{
   now: number;
   /** Client clock (starts at the server timestamp, ticks per minute). */
   clockNow: number;
+  /** Honour-system lock: data tabs render but their taps are ignored. */
+  locked: boolean;
 }>();
+
+function guard(e: MouseEvent, target: TabId): void {
+  // Deliberately silent: a locked panel ignores taps on the data tabs — no
+  // hint, no toast. The lock only ever speaks through the navbar toggle.
+  if (props.locked && target !== "clock") e.preventDefault();
+}
 
 const clockPreview = computed(() => fmtTime(new Date(props.clockNow)));
 const clockSub = computed(
@@ -42,7 +50,7 @@ const vkOpen = computed(() => String(props.vikunja.counts?.open ?? "—"));
       <span class="tab-preview">{{ clockPreview }}</span>
       <span class="tab-sub">{{ clockSub }}</span>
     </a>
-    <a class="tab" :class="{ active: tab === 'glm' }" href="/glm">
+    <a class="tab" :class="{ active: tab === 'glm' }" href="/glm" @click="guard($event, 'glm')">
       <span class="tab-label">GLM 用量</span>
       <span class="tab-preview">{{ glmUsed }}<span class="unit">% 已用</span></span>
       <span class="tab-sub"
@@ -50,7 +58,12 @@ const vkOpen = computed(() => String(props.vikunja.counts?.open ?? "—"));
         >%<br />重置 <b>{{ glmReset }}</b></span
       >
     </a>
-    <a class="tab" :class="{ active: tab === 'vikunja' }" href="/vikunja">
+    <a
+      class="tab"
+      :class="{ active: tab === 'vikunja' }"
+      href="/vikunja"
+      @click="guard($event, 'vikunja')"
+    >
       <span class="tab-label">Vikunja</span>
       <span class="tab-preview">{{ vkToday }}<span class="unit">今日</span></span>
       <span class="tab-sub"

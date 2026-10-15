@@ -13,6 +13,8 @@ import App from "./App.vue";
 interface Bootstrap {
   tab: TabId;
   state: PanelState;
+  /** Server read the lock cookie during SSR; hydration starts from it. */
+  locked: boolean;
 }
 
 const raw = document.getElementById("panel-state")?.textContent ?? "";
@@ -21,6 +23,10 @@ if (!bootstrap || !bootstrap.state) {
   throw new Error("#panel-state bootstrap JSON missing — the server shell is broken");
 }
 
-createSSRApp(App, { tab: bootstrap.tab, initial: bootstrap.state })
+createSSRApp(App, {
+  tab: bootstrap.tab,
+  initial: bootstrap.state,
+  locked: bootstrap.locked,
+})
   .use(vaporInteropPlugin)
   .mount("#app");

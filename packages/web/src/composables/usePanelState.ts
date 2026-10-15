@@ -10,10 +10,11 @@
 //   - vw/vh/dpr ride along for the server's viewport diagnostics
 //   - no timers beyond the poll: countdowns advance when the state advances
 
-import { onMounted, onScopeDispose, ref, shallowRef } from "vue";
-import { POLL_MS, type PanelState, type TabId } from "@mira-panel/shared";
+import { onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
+import type { Ref } from "vue";
+import { LOCK_POLL_MS, POLL_MS, type PanelState, type TabId } from "@mira-panel/shared";
 
-export function usePanelState(initial: PanelState, tab: TabId) {
+export function usePanelState(initial: PanelState, tab: TabId, locked?: Ref<boolean>) {
   const state = shallowRef<PanelState>(initial);
   // Transient navbar acknowledgement ("已刷新 …" / "⚠ 请求失败"). Null on the
   // server and on the first client render, so hydration always agrees.
@@ -22,6 +23,7 @@ export function usePanelState(initial: PanelState, tab: TabId) {
   let timer: ReturnType<typeof setInterval> | undefined;
 
   function activeStale(s: PanelState): boolean {
+    if (tab === "clock") return s.glm.stale || s.vikunja.stale;
     return tab === "vikunja" ? s.vikunja.stale : s.glm.stale;
   }
 
@@ -49,11 +51,20 @@ export function usePanelState(initial: PanelState, tab: TabId) {
     }
   }
 
-  onMounted(() => {
-    timer = setInterval(() => {
-      void poll(false);
-    }, POLL_MS);
-  });
+  // The poll cadence follows the lock: 60s normally, 10min while locked (the
+  // clock itself keeps ticking client-side without any fetch).
+  function arm(): void {
+    clearInterval(timer);
+    timer = setInterval(
+      () => {
+        void poll(false);
+      },
+      locked?.value ? LOCK_POLL_MS : POLL_MS,
+    );
+  }
+
+  onMounted(arm);
+  if (locked) watch(locked, arm);
   onScopeDispose(() => clearInterval(timer)); // dev HMR unmounts; the kiosk never does
 
   return { state, flash, refresh: (manual: boolean) => void poll(manual) };

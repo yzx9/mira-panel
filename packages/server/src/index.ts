@@ -35,11 +35,11 @@ try {
   assertMarkers(shell);
   const ssrUrl = pathToFileURL(SSR_PATH).href;
   const { render } = (await import(ssrUrl)) as { render: RenderPage };
-  renderPage = async (tab, state) =>
+  renderPage = async (tab, state, locked) =>
     assemble(shell, {
       title: tabTitle(tab),
-      appHtml: await render(tab, state),
-      bootstrap: { tab, state },
+      appHtml: await render(tab, state, locked),
+      bootstrap: { tab, state, locked },
     });
   staticRoots.push(WEB_CLIENT_DIR);
   process.stdout.write(`[mira-panel] web bundle loaded (build ${build})\n`);

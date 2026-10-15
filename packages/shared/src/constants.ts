@@ -8,6 +8,11 @@ export const CANVAS_H = 1650;
 // friendly — a poll only rewrites the digits that actually changed.
 export const POLL_MS = 60_000;
 
+// Locked-mode cadence: the data tabs are decorative while locked, so the poll
+// slows down to keep the e-paper and the upstreams quiet. The clock itself
+// still ticks every minute (client-side, no fetch).
+export const LOCK_POLL_MS = 10 * 60_000;
+
 // How many task rows each Vikunja bucket table shows before the "另有 N 项"
 // note. Counts in the card headers always show the full numbers.
 export const CAP_TODAY = 7;

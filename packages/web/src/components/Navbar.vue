@@ -9,9 +9,11 @@ const props = defineProps<{
   vikunja: VikunjaState;
   /** Transient client ack; null on the server and until the user acts. */
   flash: string | null;
+  /** Honour-system lock; the toggle is the only control that still works. */
+  locked: boolean;
 }>();
 
-const emit = defineEmits<{ "refresh-data": []; "reload-page": [] }>();
+const emit = defineEmits<{ "refresh-data": []; "reload-page": []; "toggle-lock": [] }>();
 
 const active = computed(() => (props.tab === "vikunja" ? props.vikunja : props.glm));
 const health = computed(() => props.flash ?? healthText(active.value.ok));
@@ -54,8 +56,17 @@ const fetchedAt = computed(() =>
       <span
         >更新于 <b>{{ fetchedAt }}</b></span
       >
-      <button @click="emit('refresh-data')">刷新数据</button>
-      <button @click="emit('reload-page')">刷新页面</button>
+      <!-- While locked the two refresh buttons disappear entirely: a button
+           that lights up on tap but does nothing is a lie — only the unlock
+           toggle remains on screen. -->
+      <template v-if="locked">
+        <button @click="emit('toggle-lock')">解锁</button>
+      </template>
+      <template v-else>
+        <button @click="emit('refresh-data')">刷新数据</button>
+        <button @click="emit('reload-page')">刷新页面</button>
+        <button @click="emit('toggle-lock')">锁定</button>
+      </template>
     </div>
   </header>
 </template>

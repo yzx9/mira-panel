@@ -14,7 +14,7 @@ import { serveStatic, type StaticResult } from "./staticFiles.ts";
 import { stateFor } from "./state.ts";
 import { noteClientViewport } from "./viewport.ts";
 
-export type RenderPage = (tab: TabId, state: PanelState) => Promise<string>;
+export type RenderPage = (tab: TabId, state: PanelState, locked: boolean) => Promise<string>;
 
 export interface AppDeps {
   build: string;
@@ -59,11 +59,18 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/healthz", (c) => c.text("ok\n"));
 
+  // The lock lives in a cookie so SSR renders the locked navbar from the
+  // first paint — a locked panel never repaints its buttons after hydration.
+  function lockCookie(header: string | undefined): boolean {
+    return (header ?? "").split(";").some((p) => p.trim() === "mira-panel-lock=1");
+  }
+
   // One tab = one URL = one SSR pass. No client-side routing, so a tab switch
   // is a normal navigation the e-paper repaints anyway.
   const page = (tab: TabId) => async (c: Context) => {
     if (!deps.renderPage) return c.text("web package not built — run `npm run build` first", 503);
-    return c.html(await deps.renderPage(tab, await stateFor(deps.build)));
+    const locked = lockCookie(c.req.header("Cookie"));
+    return c.html(await deps.renderPage(tab, await stateFor(deps.build), locked));
   };
   const clockPage = page("clock");
   app.get("/", clockPage);

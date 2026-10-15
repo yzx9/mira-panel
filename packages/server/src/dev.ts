@@ -42,12 +42,16 @@ const app = createApp({
   build,
   staticRoots: [join(import.meta.dirname, "../public")],
   clientInfo: lastViewport,
-  renderPage: async (tab, state) => {
+  renderPage: async (tab, state, locked) => {
     // ssrLoadModule runs the web sources through vite (aliases + vapor SFC
     // compile included) and caches with HMR-aware invalidation.
     const { render } = (await vite.ssrLoadModule("/src/entry-server.ts")) as { render: RenderPage };
-    const appHtml = await render(tab, state);
-    const html = assemble(shell, { title: tabTitle(tab), appHtml, bootstrap: { tab, state } });
+    const appHtml = await render(tab, state, locked);
+    const html = assemble(shell, {
+      title: tabTitle(tab),
+      appHtml,
+      bootstrap: { tab, state, locked },
+    });
     // Lets vite rewrite /src/* imports and inject its HMR client.
     return vite.transformIndexHtml(tab === "vikunja" ? "/vikunja" : "/glm", html);
   },

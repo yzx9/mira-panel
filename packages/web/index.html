@@ -2,7 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- No zoom of any kind: the canvas is fitted by --fit, so browser zoom
+     (pinch/double-tap/user-scalable) only misaligns it. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
     <meta name="color-scheme" content="light only" />
     <meta name="theme-color" content="#ffffff" />
     <title><!--title--></title>
@@ -17,6 +22,55 @@
         }
         fit();
         window.addEventListener("resize", fit);
+      })();
+    </script>
+    <script>
+      /* Zoom guards, second layer after the viewport meta and epaper.css
+   touch-action: Firefox kiosk zoom is the DEFAULT ACTION of the touch
+   events, so a non-passive preventDefault() cancels the zoom itself.
+   Covers pinch (2+ touches), double-tap zoom (two taps on the same spot
+   inside 350ms — far apart taps stay clickable), and ctrl+wheel. */
+      (function () {
+        ["touchstart", "touchmove"].forEach(function (ev) {
+          window.addEventListener(
+            ev,
+            function (e) {
+              if (e.touches.length > 1) e.preventDefault();
+            },
+            { passive: false },
+          );
+        });
+        var lastTap = 0;
+        var lastX = 0;
+        var lastY = 0;
+        window.addEventListener(
+          "touchend",
+          function (e) {
+            var t = e.changedTouches[0];
+            if (e.touches.length > 0 || !t) return;
+            var now = Date.now();
+            if (
+              now - lastTap < 350 &&
+              Math.abs(t.clientX - lastX) < 40 &&
+              Math.abs(t.clientY - lastY) < 40
+            ) {
+              e.preventDefault();
+              lastTap = 0;
+            } else {
+              lastTap = now;
+              lastX = t.clientX;
+              lastY = t.clientY;
+            }
+          },
+          { passive: false },
+        );
+        window.addEventListener(
+          "wheel",
+          function (e) {
+            if (e.ctrlKey) e.preventDefault();
+          },
+          { passive: false },
+        );
       })();
     </script>
     <!-- The stylesheet is a plain <link>, NOT a JS import: with JavaScript off

@@ -21,7 +21,11 @@ body {
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
   user-select: none;
-  touch-action: manipulation;
+  /* pan but never zoom: "manipulation" explicitly ALLOWS pinch zoom — on a
+     --fit-scaled canvas that only misaligns the panel. Panning stays so the
+     main overflow fallback remains touch-scrollable; the guard script in
+     index.html cancels what Firefox's kiosk zoom path ignores here. */
+  touch-action: pan-x pan-y;
   overscroll-behavior: none;
 }
 

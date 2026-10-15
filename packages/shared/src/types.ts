@@ -3,7 +3,7 @@
 // the client never fetches or normalises anything itself — it only renders
 // this shape, which is what keeps SSR output and 60s-poll patches identical.
 
-export type TabId = "glm" | "vikunja";
+export type TabId = "clock" | "glm" | "vikunja";
 
 export interface PanelState {
   /** Server build id; the client reloads itself when it changes. */

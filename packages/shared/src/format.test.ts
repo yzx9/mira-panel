@@ -7,8 +7,10 @@ import {
   fmtCountdown,
   fmtDate,
   fmtInt,
+  fmtMonthDay,
   fmtTime,
   fmtTokens,
+  fmtWeekday,
   healthText,
   resetAtText,
   resetInText,
@@ -62,4 +64,11 @@ test("resetInText appends the 后重置 suffix or reports unknown", () => {
 test("healthText mirrors the old navbar markers", () => {
   assert.equal(healthText(true), "正常");
   assert.equal(healthText(false), "⚠ 数据陈旧");
+});
+
+test("fmtMonthDay / fmtWeekday feed the clock date wall", () => {
+  assert.equal(fmtMonthDay(new Date(2026, 9, 15)), "10月15日");
+  assert.equal(fmtMonthDay(new Date(2026, 0, 4)), "1月4日");
+  assert.equal(fmtWeekday(new Date(2026, 9, 15)), "星期四");
+  assert.equal(fmtWeekday(new Date(2026, 9, 18)), "星期日");
 });

@@ -23,7 +23,9 @@ export interface PageSlots {
 }
 
 export function tabTitle(tab: TabId): string {
-  return tab === "vikunja" ? "Mira Monitor · Vikunja" : "Mira Monitor · GLM 用量";
+  if (tab === "vikunja") return "Mira Monitor · Vikunja";
+  if (tab === "glm") return "Mira Monitor · GLM 用量";
+  return "Mira Monitor · 时钟";
 }
 
 /** Replace the markers. Each replacement goes through a function so `$`

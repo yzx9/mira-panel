@@ -65,10 +65,11 @@ export function createApp(deps: AppDeps): Hono {
     if (!deps.renderPage) return c.text("web package not built — run `npm run build` first", 503);
     return c.html(await deps.renderPage(tab, await stateFor(deps.build)));
   };
-  const glmPage = page("glm");
-  app.get("/", glmPage);
-  app.get("/glm", glmPage);
-  app.get("/index.html", glmPage);
+  const clockPage = page("clock");
+  app.get("/", clockPage);
+  app.get("/clock", clockPage);
+  app.get("/index.html", clockPage);
+  app.get("/glm", page("glm"));
   app.get("/vikunja", page("vikunja"));
 
   // What the 60s client poll consumes: the whole panel state (the old texts/

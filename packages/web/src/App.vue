@@ -5,12 +5,15 @@
 import type { PanelState, TabId } from "@mira-panel/shared";
 import Navbar from "./components/Navbar.vue";
 import TabRail from "./components/TabRail.vue";
+import ClockDetail from "./components/clock/ClockDetail.vue";
 import GlmDetail from "./components/glm/GlmDetail.vue";
 import VikunjaDetail from "./components/vikunja/VikunjaDetail.vue";
+import { useClock } from "./composables/useClock";
 import { usePanelState } from "./composables/usePanelState";
 
 const props = defineProps<{ tab: TabId; initial: PanelState }>();
 
+const { clockNow } = useClock(props.initial.now);
 const { state, flash, refresh } = usePanelState(props.initial, props.tab);
 
 function reloadPage(): void {
@@ -28,9 +31,16 @@ function reloadPage(): void {
     @reload-page="reloadPage"
   />
   <div class="body">
-    <TabRail :tab="tab" :glm="state.glm" :vikunja="state.vikunja" :now="state.now" />
+    <TabRail
+      :tab="tab"
+      :glm="state.glm"
+      :vikunja="state.vikunja"
+      :now="state.now"
+      :clock-now="clockNow"
+    />
     <main>
-      <GlmDetail v-if="tab === 'glm'" :glm="state.glm" :now="state.now" />
+      <ClockDetail v-if="tab === 'clock'" :clock-now="clockNow" />
+      <GlmDetail v-else-if="tab === 'glm'" :glm="state.glm" :now="state.now" />
       <VikunjaDetail v-else :vikunja="state.vikunja" />
     </main>
   </div>

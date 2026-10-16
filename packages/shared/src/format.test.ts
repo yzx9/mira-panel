@@ -11,7 +11,6 @@ import {
   fmtTime,
   fmtTokens,
   fmtWeekday,
-  healthText,
   resetAtText,
   resetInText,
 } from "./format.ts";
@@ -59,11 +58,6 @@ test("resetInText appends the 后重置 suffix or reports unknown", () => {
   const now = Date.now();
   assert.equal(resetInText(null, now), "重置时间未知");
   assert.equal(resetInText(now + HOUR, now), "1小时 0分 后重置");
-});
-
-test("healthText mirrors the old navbar markers", () => {
-  assert.equal(healthText(true), "正常");
-  assert.equal(healthText(false), "⚠ 数据陈旧");
 });
 
 test("fmtMonthDay / fmtWeekday feed the clock date wall", () => {

@@ -1,58 +1,26 @@
 <script setup vapor lang="ts">
-import { computed } from "vue";
-import { healthText } from "@mira-panel/shared";
-import type { GlmState, TabId, VikunjaState } from "@mira-panel/shared";
-
-const props = defineProps<{
-  tab: TabId;
-  glm: GlmState;
-  vikunja: VikunjaState;
+// Standalone chrome: title, data-freshness stamp, controls — no source
+// states. App resolves which fetchedAt to show (clock tab = the later of
+// both sources), so the navbar stays tab-agnostic and renders the same
+// shape on every tab. `flash` is the refresh button's own transient ack
+// (or "⚠ 请求失败" while polls are failing) — not a data prop.
+defineProps<{
   /** Transient client ack; null on the server and until the user acts. */
   flash: string | null;
+  /** Server-formatted "HH:MM" of the tab's last successful fetch ("—" if none). */
+  fetchedAt: string;
   /** Honour-system lock; the toggle is the only control that still works. */
   locked: boolean;
 }>();
 
 const emit = defineEmits<{ "refresh-data": []; "reload-page": []; "toggle-lock": [] }>();
-
-const active = computed(() => (props.tab === "vikunja" ? props.vikunja : props.glm));
-const health = computed(() => props.flash ?? healthText(active.value.ok));
-// The clock tab speaks for both sources at once.
-const clockHealth = computed(() => props.flash ?? healthText(props.glm.ok && props.vikunja.ok));
-const clockFetchedAt = computed(() => {
-  if (props.glm.fetchedAt === "—") return props.vikunja.fetchedAt;
-  if (props.vikunja.fetchedAt === "—") return props.glm.fetchedAt;
-  return props.glm.fetchedAt >= props.vikunja.fetchedAt
-    ? props.glm.fetchedAt
-    : props.vikunja.fetchedAt;
-});
-const fetchedAt = computed(() =>
-  props.tab === "clock" ? clockFetchedAt.value : active.value.fetchedAt,
-);
 </script>
 
 <template>
   <header>
     <h1>Mira Monitor</h1>
     <div class="head-right">
-      <template v-if="tab === 'clock'">
-        <span
-          >数据 <b>{{ clockHealth }}</b></span
-        >
-      </template>
-      <template v-else-if="tab === 'vikunja'">
-        <span
-          >未完成 <b>{{ vikunja.counts?.open ?? "—" }}</b></span
-        >
-        <span
-          >数据 <b>{{ health }}</b></span
-        >
-      </template>
-      <template v-else>
-        <span
-          >数据 <b>{{ health }}</b></span
-        >
-      </template>
+      <span v-if="flash">{{ flash }}</span>
       <span
         >更新于 <b>{{ fetchedAt }}</b></span
       >

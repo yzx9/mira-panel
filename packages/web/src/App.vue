@@ -2,7 +2,7 @@
 // Root component, deliberately a TWO-ROOT fragment: .screen is a grid with
 // rows `116px 1fr` and <header> / .body must be its DIRECT children — a
 // wrapper element here would become the single grid child and break layout.
-import { watch } from "vue";
+import { computed, watch } from "vue";
 import type { PanelState, TabId } from "@mira-panel/shared";
 import Navbar from "./components/Navbar.vue";
 import TabRail from "./components/TabRail.vue";
@@ -18,6 +18,19 @@ const props = defineProps<{ tab: TabId; initial: PanelState; locked: boolean }>(
 const { clockNow } = useClock(props.initial.now);
 const { locked, lock, unlock } = useLock(props.locked);
 const { state, flash, refresh } = usePanelState(props.initial, props.tab, locked);
+
+// Header freshness stamp: the active tab's fetch time; the clock tab speaks
+// for both sources, so it shows whichever fetched later ("—" = never).
+const fetchedAt = computed(() => {
+  const glm = state.value.glm.fetchedAt;
+  const vk = state.value.vikunja.fetchedAt;
+  if (props.tab === "clock") {
+    if (glm === "—") return vk;
+    if (vk === "—") return glm;
+    return glm >= vk ? glm : vk;
+  }
+  return props.tab === "vikunja" ? vk : glm;
+});
 
 // Unlocking should feel immediate: pull fresh data right away (the locked
 // poll may be up to 10 minutes stale).
@@ -45,10 +58,8 @@ function onToggleLock(): void {
 
 <template>
   <Navbar
-    :tab="tab"
-    :glm="state.glm"
-    :vikunja="state.vikunja"
     :flash="flash"
+    :fetched-at="fetchedAt"
     :locked="locked"
     @refresh-data="onRefreshData"
     @reload-page="reloadPage"

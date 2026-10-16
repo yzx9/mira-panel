@@ -43,9 +43,6 @@ export function resetInText(resetMs: number | null, now: number): string {
   return `${fmtCountdown(resetMs - now)} 后重置`;
 }
 
-/** Navbar health slot; the client may override it with a transient flash. */
-export const healthText = (ok: boolean): string => (ok ? "正常" : "⚠ 数据陈旧");
-
 const WEEKDAYS = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
 
 /** Date-wall label: "10月15日". */

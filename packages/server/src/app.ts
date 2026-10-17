@@ -1,30 +1,30 @@
 // The Hono application: response headers, route table and error handling,
 // ported from the previous server.mjs. Page rendering is injected via deps
 // because it differs between dev (vite ssrLoadModule) and prod (the built
-// entry-server bundle).
+// entry-server bundle). The hub likewise arrives via deps so each entry
+// binds it to its own build id.
 
 import { Hono } from "hono";
 import type { Context } from "hono";
 
-import type { PanelState, TabId } from "@mira-panel/shared";
+import type { PanelState, TabId, VikunjaState } from "@mira-panel/shared";
 
-import { getDeepSeekBalance } from "./data/deepseek.ts";
-import { getTavilyUsage } from "./data/tavily.ts";
-import { getUsage } from "./data/usage.ts";
-import { getTasks, markDone } from "./data/vikunja.ts";
+import { markTaskDone } from "./data/vikunja.ts";
+import type { Hub } from "./hub.ts";
 import { serveStatic, type StaticResult } from "./staticFiles.ts";
 import { stateFor, vikunjaState } from "./state.ts";
-import { noteClientViewport } from "./viewport.ts";
+import type { ClientViewport } from "./viewport.ts";
 
 export type RenderPage = (tab: TabId, state: PanelState, locked: boolean) => Promise<string>;
 
 export interface AppDeps {
   build: string;
+  hub: Hub;
   /** Undefined when the web bundle is missing -> pages answer 503. */
   renderPage?: RenderPage;
   /** Searched in order for the static fallback. */
   staticRoots: string[];
-  clientInfo: () => { stamp: string; at: string } | null;
+  clientInfo: () => ClientViewport | null;
 }
 
 function toArrayBuffer(body: Uint8Array | string): ArrayBuffer | string {
@@ -51,6 +51,10 @@ export function createApp(deps: AppDeps): Hono {
     c.header("X-Content-Type-Options", "nosniff");
   });
 
+  // Per-task in-flight completions: a double tap shares one request (and
+  // re-marking a done task done is idempotent upstream anyway).
+  const marking = new Map<number, Promise<VikunjaState>>();
+
   // The single deliberate write path, registered BEFORE the method guard
   // below: Hono composes matching handlers in registration order and a route
   // handler that answers is terminal, so this POST never reaches the guard.
@@ -61,13 +65,24 @@ export function createApp(deps: AppDeps): Hono {
     if (c.req.header("X-Panel-Write") !== "1") return c.text("Missing X-Panel-Write header", 400);
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id) || id <= 0) return c.text("Bad task id", 400);
+    const run =
+      marking.get(id) ??
+      (async () => {
+        await markTaskDone(id);
+        // Force-refresh through the hub: the answer reflects the write AND
+        // every subscriber's vikunja topic gets the same push.
+        return vikunjaState(await deps.hub.forceRefresh("vikunja"));
+      })();
+    marking.set(id, run);
     try {
-      return c.json(vikunjaState(await markDone(id)));
+      return c.json(await run);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.startsWith("HTTP 403"))
         return c.text("Vikunja rejected the write — token is likely read-only", 502);
       throw err; // -> onError -> 500 (the client flashes a generic failure)
+    } finally {
+      marking.delete(id);
     }
   });
 
@@ -88,14 +103,15 @@ export function createApp(deps: AppDeps): Hono {
   }
 
   // One tab = one URL = one SSR pass. No client-side routing, so a tab switch
-  // is a normal navigation the e-paper repaints anyway.
+  // is a normal navigation the e-paper repaints anyway. The bootstrap is
+  // tab-aware: stateFor embeds exactly the slices the tab's WS topics carry.
   const page = (tab: TabId) => async (c: Context) => {
     if (!deps.renderPage) return c.text("web package not built — run `npm run build` first", 503);
     const locked = lockCookie(c.req.header("Cookie"));
     // A locked panel only ever shows the clock: the data tabs redirect there,
     // so the lock holds at the URL level too, not just the rail's click guard.
     if (locked && tab !== "clock") return c.redirect("/");
-    return c.html(await deps.renderPage(tab, await stateFor(deps.build), locked));
+    return c.html(await deps.renderPage(tab, await stateFor(deps.hub, tab, deps.build), locked));
   };
   const clockPage = page("clock");
   app.get("/", clockPage);
@@ -104,25 +120,11 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/glm", page("glm"));
   app.get("/vikunja", page("vikunja"));
 
-  // What the 60s client poll consumes: the whole panel state (the old texts/
-  // bars id-maps are gone together with the vanilla patcher). /api/usage
-  // stays as an alias so pre-reload bookmarks keep working.
-  const apiState = async (c: Context) => {
-    noteClientViewport({ get: (n) => c.req.query(n) });
-    return c.json(await stateFor(deps.build));
-  };
-  app.get("/api/state", apiState);
-  app.get("/api/usage", apiState);
-
-  // Debug view: full raw payload for all four sources + client viewport.
-  app.get("/api/raw", async (c) => {
-    const [glm, tasks, deepseek, tavily] = await Promise.all([
-      getUsage(),
-      getTasks(),
-      getDeepSeekBalance(),
-      getTavilyUsage(),
-    ]);
-    return c.json({ glm, tasks, deepseek, tavily, client: deps.clientInfo() });
+  // Debug view: every source's cached state + the client viewport. The old
+  // /api/state poll is gone with the poll itself — the panel's steady-state
+  // transport is the /ws socket (ws.ts).
+  app.get("/api/raw", (c) => {
+    return c.json({ sources: deps.hub.dump(), client: deps.clientInfo() });
   });
 
   // Static fallback, registered last so /index.html is never served raw.

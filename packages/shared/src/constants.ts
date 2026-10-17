@@ -4,14 +4,20 @@
 export const CANVAS_W = 2200;
 export const CANVAS_H = 1650;
 
-// Panel refresh cadence: the client polls /api/state every minute. E-paper
-// friendly — a poll only rewrites the digits that actually changed.
-export const POLL_MS = 60_000;
+// WebSocket keepalive: the server sends an app-level JSON ping at this
+// cadence (browser WS ping frames never wake JS, so the client could not
+// watch them). Any message resets the client's watchdog.
+export const PING_MS = 30_000;
 
-// Locked-mode cadence: the data tabs are decorative while locked, so the poll
-// slows down to keep the e-paper and the upstreams quiet. The clock itself
-// still ticks every minute (client-side, no fetch).
-export const LOCK_POLL_MS = 10 * 60_000;
+// Client watchdog: no server message for this long means the connection is
+// half-open — close it and reconnect. Two missed pings plus slack.
+export const WATCHDOG_MS = 120_000;
+
+// Reconnect backoff after a dropped connection: doubles per failed attempt,
+// capped. A successful open resets the ladder; the browser "online" event
+// triggers an immediate retry on top of the ladder.
+export const RECONNECT_MIN_MS = 1_000;
+export const RECONNECT_MAX_MS = 30_000;
 
 // Row slots the /vikunja task card shows per page: one slot per task row or
 // per bucket header. Tuned for the 2200x1650 canvas WITH the kiosk's airy

@@ -1,6 +1,6 @@
 // Production entry: boot-time build id, the built web bundle (shell + SSR
-// render), static assets, then listen. Run `npm run build` first — without a
-// web bundle the API still works and pages answer 503.
+// render), static assets, the /ws socket, then listen. Run `npm run build`
+// first — without a web bundle the API still works and pages answer 503.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,10 +9,10 @@ import { serve } from "@hono/node-server";
 
 import { createApp, type RenderPage } from "./app.ts";
 import { computeBuildId } from "./buildId.ts";
-import { getDeepSeekBalance } from "./data/deepseek.ts";
-import { getTavilyUsage } from "./data/tavily.ts";
+import { createPanelHub } from "./hub.ts";
 import { assemble, assertMarkers, tabTitle } from "./template.ts";
 import { lastViewport } from "./viewport.ts";
+import { wirePanelSocket } from "./ws.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "../../..");
 const PUBLIC_DIR = join(import.meta.dirname, "../public");
@@ -51,15 +51,18 @@ try {
   );
 }
 
-const app = createApp({ build, renderPage, staticRoots, clientInfo: lastViewport });
+const hub = createPanelHub(build);
+const app = createApp({ build, hub, renderPage, staticRoots, clientInfo: lastViewport });
 
-serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
+const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
   process.stdout.write(`[mira-panel] panel on http://${HOST}:${PORT}/ (build ${build})\n`);
 });
+wirePanelSocket(server, hub);
 
 // Warm the slow sources at boot: Tavily pays a proxy round trip and DeepSeek
-// may rotate keys on the first call — do it before the first SSR pass, not
-// during it. Cache TTLs make this exactly one request per restart; both
-// layers resolve (never reject), so fire-and-forget is safe.
-void getDeepSeekBalance();
-void getTavilyUsage();
+// may rotate keys on the first call — do it before the first GLM-tab SSR
+// pass, not during it. The hub never rejects and a warmed source serves its
+// snapshot to the first subscriber without a wait, so fire-and-forget is
+// safe. GLM/Vikunja stay on-demand (a landing clock tab does not need them).
+hub.touch("deepseek");
+hub.touch("tavily");

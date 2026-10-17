@@ -3,7 +3,7 @@
 // GET https://api.deepseek.com/user/balance, Authorization: Bearer <key>,
 // DIRECT connection (no proxy — verified reachable from this host). Amounts
 // arrive as STRINGS; there is no usage/token endpoint, so this is purely a
-// balance snapshot. Refreshed every 5 minutes — a balance changes slowly.
+// balance snapshot. Refreshed every 30 minutes — a balance changes slowly.
 //
 // Key chain (live-verified): the DEEPSEEK_API_KEY in agenix/llm-api-keys is
 // STALE (authentication_error); the one in agenix/hermes-env is valid. Keys
@@ -11,24 +11,20 @@
 // rotates to the next candidate and the winner is cached and tried first
 // until it 401s again. Key values exist only in server memory — never in
 // error strings, never in the data objects (hence never in /api/raw).
+//
+// The exported fetcher is a pure upstream read that throws on failure —
+// caching, cadence and the stale-on-error contract live in the hub.
 
-import { fmtDate, fmtTime } from "@mira-panel/shared";
 import type { DeepSeekBalance } from "@mira-panel/shared";
 
 import { agenixFile, readKeyFile } from "./keys.ts";
 
 const API = "https://api.deepseek.com/user/balance";
-const DATA_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 12 * 1000;
 
-/** Raw DeepSeek payload: everything /api/raw shows (no secrets — `api` is the
- *  verbatim upstream JSON, which contains balances only). */
-export interface DeepSeekData {
-  ok: boolean;
-  stale: boolean;
-  error: string | null;
-  fetchedAt: string;
-  fetchedDate: string;
+/** Body of the deepseek source: the mapped balance plus the verbatim
+ *  upstream JSON for /api/raw (balances only, no secrets). */
+export interface DeepSeekBody {
   /** null when balance_infos came back empty (carries `available` too). */
   balance: DeepSeekBalance | null;
   api: unknown;
@@ -55,7 +51,7 @@ const toAmount = (v: string | undefined): number => {
 };
 
 /** Map the payload; prefers the CNY entry when several currencies return. */
-export function parseBalance(json: DeepSeekResponse | null): Pick<DeepSeekData, "balance"> {
+export function parseBalance(json: DeepSeekResponse | null): { balance: DeepSeekBalance | null } {
   const infos = Array.isArray(json?.balance_infos) ? json!.balance_infos! : [];
   const info = infos.find((b) => b.currency === "CNY") ?? infos[0] ?? null;
   return {
@@ -71,8 +67,6 @@ export function parseBalance(json: DeepSeekResponse | null): Pick<DeepSeekData, 
   };
 }
 
-let cache: { at: number; data: DeepSeekData | null } = { at: 0, data: null };
-let inflight: Promise<DeepSeekData> | null = null;
 /** Last key the API accepted; tried first while it keeps working. */
 let keyCache: { key: string } | null = null;
 
@@ -104,69 +98,34 @@ async function fetchBalance(key: string): Promise<unknown> {
   return JSON.parse(text);
 }
 
-/** Balance snapshot, cached 5 min with in-flight dedup and stale-on-error. */
-export async function getDeepSeekBalance(): Promise<DeepSeekData> {
-  if (cache.data && Date.now() - cache.at < DATA_TTL_MS) return cache.data;
-  if (inflight) return inflight;
-
-  inflight = (async (): Promise<DeepSeekData> => {
+/** Balance snapshot through the rotating key chain; throws when every
+ *  candidate key failed (the hub marks the previous numbers stale). */
+export async function fetchDeepSeekBalance(): Promise<DeepSeekBody> {
+  const list = await candidates();
+  if (list.length === 0)
+    throw new Error("no DeepSeek key (env DEEPSEEK_API_KEY / agenix hermes-env / llm-api-keys)");
+  // Cached winner first, then the rest of the chain in declared order.
+  const ordered = keyCache ? [keyCache.key, ...list.filter((k) => k !== keyCache!.key)] : list;
+  let api: unknown = null;
+  let lastAuth: AuthError | null = null;
+  for (const key of ordered) {
     try {
-      const list = await candidates();
-      if (list.length === 0)
-        throw new Error(
-          "no DeepSeek key (env DEEPSEEK_API_KEY / agenix hermes-env / llm-api-keys)",
-        );
-      // Cached winner first, then the rest of the chain in declared order.
-      const ordered = keyCache ? [keyCache.key, ...list.filter((k) => k !== keyCache!.key)] : list;
-      let api: unknown = null;
-      let lastAuth: AuthError | null = null;
-      for (const key of ordered) {
-        try {
-          api = await fetchBalance(key);
-          keyCache = { key };
-          break;
-        } catch (err) {
-          if (err instanceof AuthError) {
-            lastAuth = err;
-            continue; // rotate key
-          }
-          throw err; // network / 5xx: rotating cannot help
-        }
-      }
-      if (api === null) {
-        keyCache = null; // every candidate 401ed — start over next time
-        throw new Error(
-          `DeepSeek auth failed for all ${ordered.length} candidate keys: ${lastAuth?.message ?? "?"}`,
-        );
-      }
-      const data: DeepSeekData = {
-        ok: true,
-        stale: false,
-        error: null,
-        fetchedAt: fmtTime(new Date()),
-        fetchedDate: fmtDate(new Date()),
-        ...parseBalance(api as DeepSeekResponse),
-        api,
-      };
-      cache = { at: Date.now(), data };
-      return data;
+      api = await fetchBalance(key);
+      keyCache = { key };
+      break;
     } catch (err) {
-      // Same stale-on-error contract as the other layers: keep last numbers.
-      const previous = cache.data;
-      const data: DeepSeekData = {
-        ...(previous ?? { balance: null, api: null }),
-        ok: false,
-        stale: true,
-        error: err instanceof Error ? err.message : String(err),
-        fetchedAt: previous?.fetchedAt ?? "—",
-        fetchedDate: previous?.fetchedDate ?? "",
-      };
-      if (previous) cache = { at: Date.now(), data };
-      return data;
-    } finally {
-      inflight = null;
+      if (err instanceof AuthError) {
+        lastAuth = err;
+        continue; // rotate key
+      }
+      throw err; // network / 5xx: rotating cannot help
     }
-  })();
-
-  return inflight;
+  }
+  if (api === null) {
+    keyCache = null; // every candidate 401ed — start over next time
+    throw new Error(
+      `DeepSeek auth failed for all ${ordered.length} candidate keys: ${lastAuth?.message ?? "?"}`,
+    );
+  }
+  return { ...parseBalance(api as DeepSeekResponse), api };
 }

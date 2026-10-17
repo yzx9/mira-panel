@@ -1,116 +1,79 @@
-// Derives the client-facing PanelState from the four raw data layers. This is
-// the single contract point between server and web: SSR renders it, the page
-// embeds it as JSON for hydration, and /api/state returns the same shape.
-// The client never normalises anything itself — that is what keeps the SSR
-// pass and the 60s poll display-identical.
+// Derives the client-facing PanelState from the hub. This is the single
+// contract point between server and web: SSR renders it, the page embeds it
+// as JSON for hydration, and the WS topics push the very same payload
+// shapes — slices go through payloadFor() on both paths, which is what
+// keeps the SSR pass and the update patches display-identical.
+//
+// Bootstrap is tab-aware since the subscription refactor: a page embeds
+// exactly the slices its tab declares (TOPICS_FOR_TAB), so the clock page
+// no longer waits for (or carries) the Vikunja buckets, the DeepSeek
+// balance or the Tavily credits.
 
-import {
-  type DeepSeekState,
-  type GlmState,
-  type PanelState,
-  type TaskRow,
-  type TavilyState,
-  type VikunjaState,
-} from "@mira-panel/shared";
+import type { GlmState, PanelState, TabId, VikunjaState } from "@mira-panel/shared";
 
-import { getDeepSeekBalance, type DeepSeekData } from "./data/deepseek.ts";
-import { getTavilyUsage, type TavilyData } from "./data/tavily.ts";
-import { getUsage, type GlmData } from "./data/usage.ts";
-import { getTasks, type TaskRaw, type VikunjaData } from "./data/vikunja.ts";
+import { payloadFor, type AnySourceState, type Hub, type SourceName } from "./hub.ts";
 
-/** Map a raw task to its wire row (drops the fields only classification uses). */
-function toRow(t: TaskRaw): TaskRow {
-  return { id: t.id, title: t.title, project: t.project, when: t.when };
+/** The never-fetched stub slices embed for topics the tab does not declare
+ *  (deepseek/tavily off the GLM tab). Nothing renders them there; the shape
+ *  only has to satisfy PanelState. */
+const NEVER: AnySourceState = {
+  ok: false,
+  stale: false,
+  error: null,
+  fetchedAt: "—",
+  fetchedDate: "",
+  payload: null,
+};
+
+/** The /vikunja view-model, exported for the write route: it answers with
+ *  this same shape after a completion. */
+export function vikunjaState(s: AnySourceState): VikunjaState {
+  return payloadFor("vikunja:full", s) as VikunjaState;
 }
 
-function glmState(d: GlmData): GlmState {
-  return {
-    ok: d.ok,
-    stale: d.stale,
-    error: d.error,
-    fetchedAt: d.fetchedAt,
-    fiveHour: d.fiveHour ? { pct: d.fiveHour.pct, resetMs: d.fiveHour.resetMs } : null,
-    weekly: d.weekly ? { pct: d.weekly.pct, resetMs: d.weekly.resetMs } : null,
-    mcp: d.mcp
-      ? {
-          used: d.mcp.used,
-          total: d.mcp.total,
-          remain: d.mcp.remain,
-          pct: d.mcp.pct,
-          resetMs: d.mcp.resetMs,
-          details: d.mcp.details.map((x) => ({ name: x.name, usage: x.usage })),
-        }
-      : null,
-    usage: d.usage
-      ? {
-          calls: d.usage.calls,
-          tokens: d.usage.tokens,
-          models: d.usage.models.map((m) => ({ name: m.name, tokens: m.tokens })),
-          tools: d.usage.tools.map((t) => ({ name: t.name, count: t.count })),
-        }
-      : null,
+function glmSlice(tab: TabId, quota: AnySourceState, usage: AnySourceState): GlmState {
+  if (tab !== "glm") {
+    // Rail-only: the quota walk happened, the usage endpoints never ran.
+    const rail = payloadFor("glm:rail", quota);
+    return { ...rail, weekly: null, mcp: null, usage: null } as GlmState;
+  }
+  const pools = payloadFor("glm:quota", quota);
+  const used = payloadFor("glm:usage", usage);
+  return { ...pools, usage: used.usage } as GlmState;
+}
+
+/** Assemble a tab's bootstrap: the sources its topics need are read through
+ *  the hub (fresh within the interval, fetched otherwise — deduped with any
+ *  in-flight round); the rest embeds the last-known state when there is
+ *  one. `now` is stamped after the reads so countdowns are pure functions
+ *  of (resetMs, now) — hydration-exact by construction. */
+export async function stateFor(hub: Hub, tab: TabId, build: string): Promise<PanelState> {
+  const reads: Partial<Record<SourceName, Promise<AnySourceState>>> = {
+    "glm-quota": hub.get("glm-quota"),
+    vikunja: hub.get("vikunja"),
   };
-}
+  if (tab === "glm") {
+    reads["glm-usage"] = hub.get("glm-usage");
+    reads.deepseek = hub.get("deepseek");
+    reads.tavily = hub.get("tavily");
+  }
+  const s: Partial<Record<SourceName, AnySourceState>> = {};
+  await Promise.all(
+    (Object.keys(reads) as SourceName[]).map(async (k) => {
+      s[k] = await reads[k]!;
+    }),
+  );
 
-/** Build the /vikunja view-model: every bucket goes out in full — the
- *  client's task card pages locally. Exported for the write route, which
- *  answers with this same shape after a completion. */
-export function vikunjaState(d: VikunjaData): VikunjaState {
-  return {
-    ok: d.ok,
-    stale: d.stale,
-    error: d.error,
-    fetchedAt: d.fetchedAt,
-    counts: d.counts,
-    truncated: d.truncated,
-    buckets: d.buckets
-      ? {
-          today: d.buckets.today.map(toRow),
-          soon: d.buckets.soon.map(toRow),
-          overdue: d.buckets.overdue.map(toRow),
-          noDue: d.buckets.noDue.map(toRow),
-          later: d.buckets.later.map(toRow),
-        }
-      : null,
-  };
-}
-
-function deepSeekState(d: DeepSeekData): DeepSeekState {
-  return {
-    ok: d.ok,
-    stale: d.stale,
-    error: d.error,
-    fetchedAt: d.fetchedAt,
-    balance: d.balance, // raw already carries the shared payload shape
-  };
-}
-
-function tavilyState(d: TavilyData): TavilyState {
-  return {
-    ok: d.ok,
-    stale: d.stale,
-    error: d.error,
-    fetchedAt: d.fetchedAt,
-    usage: d.usage, // raw already carries the shared payload shape
-  };
-}
-
-/** Fetch all sources (the rail previews always need glm/vikunja) and assemble
- *  the whole-panel payload. `now` is stamped after the fetches so countdowns
- *  are pure functions of (resetMs, now) — hydration-exact by construction. */
-export async function stateFor(build: string): Promise<PanelState> {
-  const [glm, tasks, deepseek, tavily] = await Promise.all([
-    getUsage(),
-    getTasks(),
-    getDeepSeekBalance(),
-    getTavilyUsage(),
-  ]);
+  const vkTopic = tab === "vikunja" ? "vikunja:full" : "vikunja:counts";
   return {
     build,
     now: Date.now(),
-    glm: glmState(glm),
-    vikunja: vikunjaState(tasks),
-    deepseek: deepSeekState(deepseek),
-    tavily: tavilyState(tavily),
+    glm: glmSlice(tab, s["glm-quota"]!, s["glm-usage"] ?? NEVER),
+    vikunja: payloadFor(vkTopic, s.vikunja!) as VikunjaState,
+    deepseek: payloadFor(
+      "deepseek",
+      s.deepseek ?? hub.peek("deepseek") ?? NEVER,
+    ) as PanelState["deepseek"],
+    tavily: payloadFor("tavily", s.tavily ?? hub.peek("tavily") ?? NEVER) as PanelState["tavily"],
   };
 }

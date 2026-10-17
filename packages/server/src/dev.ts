@@ -10,8 +10,10 @@ import { createServer as createViteServer } from "vite";
 
 import { createApp, type RenderPage } from "./app.ts";
 import { computeBuildId } from "./buildId.ts";
+import { createPanelHub } from "./hub.ts";
 import { assemble, assertMarkers, tabTitle } from "./template.ts";
 import { lastViewport } from "./viewport.ts";
+import { wirePanelSocket } from "./ws.ts";
 
 const REPO_ROOT = join(import.meta.dirname, "../../..");
 const WEB_ROOT = join(REPO_ROOT, "packages/web");
@@ -38,8 +40,10 @@ const vite = await createViteServer({
   server: { middlewareMode: true, hmr: { server: httpServer } },
 });
 
+const hub = createPanelHub(build);
 const app = createApp({
   build,
+  hub,
   staticRoots: [join(import.meta.dirname, "../public")],
   clientInfo: lastViewport,
   renderPage: async (tab, state, locked) => {
@@ -63,3 +67,5 @@ handler = (req, res) => vite.middlewares(req, res, () => honoListener(req, res))
 httpServer.listen(PORT, HOST, () => {
   process.stdout.write(`[mira-panel] dev server on http://${HOST}:${PORT}/ (build ${build})\n`);
 });
+// The /ws upgrade coexists with vite's HMR socket on the same server.
+wirePanelSocket(httpServer, hub);

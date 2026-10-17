@@ -6,17 +6,19 @@
   "scripts": {
     "dev": "node src/dev.ts",
     "start": "node src/index.ts",
-    "test": "node --test src/data/*.test.ts",
+    "test": "node --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.0",
     "@mira-panel/shared": "*",
     "hono": "^4.13.0",
-    "undici": "^7.30.1"
+    "undici": "^7.30.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.0",
     "vite": "^8.0.0"
   }
 }

@@ -17,16 +17,15 @@
 //   TIME_LIMIT   unit=5 number=1 -> MCP / tool monthly pool
 // Missing items must be hidden, never rendered as empty cards.
 //
-// Port note: quota items carry `resetMs` (epoch ms or null) instead of the old
-// precomputed resetAt/resetIn strings — display strings are derived at
-// render/poll time from (resetMs, state.now) via the shared formatters, which
-// keeps hydration exact and countdowns no older than the last fetch.
+// The two exported fetchers are pure upstream reads that throw on failure —
+// caching, cadence and the stale-on-error contract live in the hub, which
+// calls quota and usage independently (the clock tab declares the quota walk
+// only, so the model/tool endpoints go completely uncalled there).
 
 import { execFile } from "node:child_process";
 import { readFile, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 
-import { fmtDate, fmtTime } from "@mira-panel/shared";
 import type { McpDetail, ModelUsage, ToolCall } from "@mira-panel/shared";
 
 const execFileAsync = promisify(execFile);
@@ -35,7 +34,6 @@ const CLAUDE_WRAPPER = "/etc/profiles/per-user/yzx9/bin/claude";
 const SETTINGS_RE = /\/nix\/store\/[^"'\s]*claude-code-glm-settings\.json/;
 
 const CRED_TTL_MS = 10 * 60 * 1000; // key/host rarely change
-const DATA_TTL_MS = 25 * 1000; // panel polls every 60s -> always fresh
 const REQUEST_TIMEOUT_MS = 12 * 1000;
 
 // -------------------------------------------------------------- raw shapes
@@ -68,18 +66,12 @@ export interface UsageRaw {
   tools: ToolCall[];
 }
 
-/** Raw GLM payload: everything /api/raw shows, minus any presentation. */
-export interface GlmData {
-  ok: boolean;
-  stale: boolean;
-  error: string | null;
-  fetchedAt: string;
-  fetchedDate: string;
+/** Body of the quota source: what one /quota/limit call yields. */
+export interface GlmQuotaBody {
   level: string;
   fiveHour: QuotaRaw | null;
   weekly: QuotaRaw | null;
   mcp: McpRaw | null;
-  usage: UsageRaw | null;
 }
 
 interface QuotaItem {
@@ -132,8 +124,6 @@ interface Credentials {
 }
 
 let cred: Credentials | null = null;
-let cache: { at: number; data: GlmData | null } = { at: 0, data: null };
-let inflight: Promise<GlmData> | null = null;
 
 /** Resolve { host, key } from the nix-generated claude wrapper. */
 async function credentials(): Promise<Credentials> {
@@ -210,7 +200,7 @@ function toResetMs(v: unknown): number | null {
 
 function normaliseQuota(
   data: QuotaResponse | null,
-): Pick<GlmData, "level" | "fiveHour" | "weekly" | "mcp"> {
+): Pick<GlmQuotaBody, "level" | "fiveHour" | "weekly" | "mcp"> {
   const limits = data?.limits ?? [];
   const find = (type: string, unit?: number, num?: number) =>
     limits.find(
@@ -220,7 +210,7 @@ function normaliseQuota(
         (num === undefined || l.number === num),
     );
 
-  const out: Pick<GlmData, "level" | "fiveHour" | "weekly" | "mcp"> = {
+  const out: Pick<GlmQuotaBody, "level" | "fiveHour" | "weekly" | "mcp"> = {
     level: (data?.level ?? "").toUpperCase(),
     fiveHour: null,
     weekly: null,
@@ -283,50 +273,20 @@ function normaliseUsage(
   };
 }
 
-/** Everything the panel needs, cached for 25s with in-flight dedup. */
-export async function getUsage(): Promise<GlmData> {
-  if (cache.data && Date.now() - cache.at < DATA_TTL_MS) return cache.data;
-  if (inflight) return inflight;
+/** The quota pools (5-hour, weekly, MCP) — one upstream call. */
+export async function fetchGlmQuota(): Promise<GlmQuotaBody> {
+  const { host, key } = await credentials();
+  const quota = await getJson<QuotaResponse>(`${host}/api/monitor/usage/quota/limit`, key);
+  return normaliseQuota(quota);
+}
 
-  inflight = (async (): Promise<GlmData> => {
-    try {
-      const { host, key } = await credentials();
-      const params = windowParams();
-      const [quota, models, tools] = await Promise.all([
-        getJson<QuotaResponse>(`${host}/api/monitor/usage/quota/limit`, key),
-        getJson<ModelUsageResponse>(`${host}/api/monitor/usage/model-usage${params}`, key),
-        getJson<ToolUsageResponse>(`${host}/api/monitor/usage/tool-usage${params}`, key),
-      ]);
-
-      const data: GlmData = {
-        ok: true,
-        stale: false,
-        error: null,
-        fetchedAt: fmtTime(new Date()),
-        fetchedDate: fmtDate(new Date()),
-        ...normaliseQuota(quota),
-        usage: normaliseUsage(models, tools),
-      };
-      cache = { at: Date.now(), data };
-      return data;
-    } catch (err) {
-      // Never hand the panel an empty screen: keep serving the last good
-      // numbers and mark them stale so the kiosk shows a visible warning.
-      const previous = cache.data;
-      const data: GlmData = {
-        ...(previous ?? { level: "", fiveHour: null, weekly: null, mcp: null, usage: null }),
-        ok: false,
-        stale: true,
-        error: err instanceof Error ? err.message : String(err),
-        fetchedAt: previous?.fetchedAt ?? "—",
-        fetchedDate: previous?.fetchedDate ?? "",
-      };
-      if (previous) cache = { at: Date.now(), data };
-      return data;
-    } finally {
-      inflight = null;
-    }
-  })();
-
-  return inflight;
+/** Today's model/tool usage — two upstream calls, fetched in parallel. */
+export async function fetchGlmUsage(): Promise<UsageRaw> {
+  const { host, key } = await credentials();
+  const params = windowParams();
+  const [models, tools] = await Promise.all([
+    getJson<ModelUsageResponse>(`${host}/api/monitor/usage/model-usage${params}`, key),
+    getJson<ToolUsageResponse>(`${host}/api/monitor/usage/tool-usage${params}`, key),
+  ]);
+  return normaliseUsage(models, tools);
 }

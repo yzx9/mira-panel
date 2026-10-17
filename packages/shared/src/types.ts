@@ -1,7 +1,7 @@
-// View-model types shared between the server (SSR + /api/state payload) and
-// the web components. The server derives a PanelState from the raw data layers;
-// the client never fetches or normalises anything itself — it only renders
-// this shape, which is what keeps SSR output and 60s-poll patches identical.
+// View-model types shared between the server (SSR + topic payloads) and the
+// web components. The server derives a PanelState from the data sources; the
+// client never fetches or normalises anything itself — it only renders this
+// shape, which is what keeps SSR output and WS-update patches identical.
 
 export type TabId = "clock" | "glm" | "vikunja";
 

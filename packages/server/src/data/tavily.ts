@@ -9,35 +9,31 @@
 //      not inherit the desktop session env)
 //   -> direct (last resort; expected to time out here)
 //
-// The endpoint is rate-limited to 10 requests / 10 minutes, so DATA_TTL_MS is
-// exactly 10 minutes — the 60s panel poll always hits the cache. A 429 falls
-// into the generic error path (stale card); if other Tavily consumers on the
-// same key collide, bump the TTL past the window.
+// The endpoint is rate-limited to 10 requests / 10 minutes; the hub refreshes
+// this source every 30 minutes, comfortably inside the window even if other
+// Tavily consumers on the same key collide (a 429 throws into the generic
+// stale-on-error path).
 //
 // The monthly reset is NOT in the payload; the card derives it at render time
 // from state.now via the shared nextMonthStart(). Key values exist only in
 // server memory — never in error strings, never in the data objects.
+//
+// The exported fetcher is a pure upstream read that throws on failure —
+// caching, cadence and the stale-on-error contract live in the hub.
 
 import { readFile } from "node:fs/promises";
 import { ProxyAgent } from "undici";
 
-import { fmtDate, fmtTime } from "@mira-panel/shared";
 import type { TavilyUsage } from "@mira-panel/shared";
 
 import { agenixFile, keyFromText, readKeyFile } from "./keys.ts";
 
 const API = "https://api.tavily.com/usage";
-const DATA_TTL_MS = 10 * 60 * 1000; // = the endpoint's rate-limit window
 const REQUEST_TIMEOUT_MS = 12 * 1000;
 
-/** Raw Tavily payload: everything /api/raw shows (no secrets — `api` is the
- *  verbatim upstream JSON, which contains usage counters only). */
-export interface TavilyData {
-  ok: boolean;
-  stale: boolean;
-  error: string | null;
-  fetchedAt: string;
-  fetchedDate: string;
+/** Body of the tavily source: the mapped usage plus the verbatim upstream
+ *  JSON for /api/raw (usage counters only, no secrets). */
+export interface TavilyBody {
   /** null when the payload had no account block. */
   usage: TavilyUsage | null;
   api: unknown;
@@ -79,7 +75,7 @@ const toCount = (v: unknown): number | null => {
 };
 
 /** Map the account pool (headline) plus this key's own counter. */
-export function parseUsage(json: TavilyResponse | null): Pick<TavilyData, "usage"> {
+export function parseUsage(json: TavilyResponse | null): { usage: TavilyUsage | null } {
   const acc = json?.account;
   if (!acc) return { usage: null };
   const used = toCount(acc.plan_usage) ?? 0;
@@ -95,8 +91,6 @@ export function parseUsage(json: TavilyResponse | null): Pick<TavilyData, "usage
   };
 }
 
-let cache: { at: number; data: TavilyData | null } = { at: 0, data: null };
-let inflight: Promise<TavilyData> | null = null;
 /** Last key the API accepted; tried first while it keeps working. */
 let keyCache: { key: string } | null = null;
 
@@ -156,70 +150,37 @@ async function fetchUsage(key: string, dispatcher: ProxyAgent | null): Promise<u
   return JSON.parse(text);
 }
 
-/** Usage snapshot, cached 10 min (= rate-limit window) with in-flight dedup
- *  and stale-on-error. */
-export async function getTavilyUsage(): Promise<TavilyData> {
-  if (cache.data && Date.now() - cache.at < DATA_TTL_MS) return cache.data;
-  if (inflight) return inflight;
-
-  inflight = (async (): Promise<TavilyData> => {
+/** Usage snapshot through the rotating key chain and the local proxy;
+ *  throws when every candidate key failed (the hub marks the previous
+ *  numbers stale). */
+export async function fetchTavilyUsage(): Promise<TavilyBody> {
+  const list = await candidates();
+  if (list.length === 0)
+    throw new Error("no Tavily key (env TAVILY_API_KEY / agenix hermes-env / llm-api-keys)");
+  const proxy = await proxyUrl();
+  const dispatcher = proxy ? dispatcherFor(proxy) : null;
+  // Cached winner first, then the rest of the chain in declared order.
+  const ordered = keyCache ? [keyCache.key, ...list.filter((k) => k !== keyCache!.key)] : list;
+  let api: unknown = null;
+  let lastAuth: AuthError | null = null;
+  for (const key of ordered) {
     try {
-      const list = await candidates();
-      if (list.length === 0)
-        throw new Error("no Tavily key (env TAVILY_API_KEY / agenix hermes-env / llm-api-keys)");
-      const proxy = await proxyUrl();
-      const dispatcher = proxy ? dispatcherFor(proxy) : null;
-      // Cached winner first, then the rest of the chain in declared order.
-      const ordered = keyCache ? [keyCache.key, ...list.filter((k) => k !== keyCache!.key)] : list;
-      let api: unknown = null;
-      let lastAuth: AuthError | null = null;
-      for (const key of ordered) {
-        try {
-          api = await fetchUsage(key, dispatcher);
-          keyCache = { key };
-          break;
-        } catch (err) {
-          if (err instanceof AuthError) {
-            lastAuth = err;
-            continue; // rotate key
-          }
-          throw err; // network / 5xx / 429: rotating cannot help
-        }
-      }
-      if (api === null) {
-        keyCache = null; // every candidate 401ed — start over next time
-        throw new Error(
-          `Tavily auth failed for all ${ordered.length} candidate keys: ${lastAuth?.message ?? "?"}`,
-        );
-      }
-      const data: TavilyData = {
-        ok: true,
-        stale: false,
-        error: null,
-        fetchedAt: fmtTime(new Date()),
-        fetchedDate: fmtDate(new Date()),
-        ...parseUsage(api as TavilyResponse),
-        api,
-      };
-      cache = { at: Date.now(), data };
-      return data;
+      api = await fetchUsage(key, dispatcher);
+      keyCache = { key };
+      break;
     } catch (err) {
-      // Same stale-on-error contract as the other layers: keep last numbers.
-      const previous = cache.data;
-      const data: TavilyData = {
-        ...(previous ?? { usage: null, api: null }),
-        ok: false,
-        stale: true,
-        error: err instanceof Error ? err.message : String(err),
-        fetchedAt: previous?.fetchedAt ?? "—",
-        fetchedDate: previous?.fetchedDate ?? "",
-      };
-      if (previous) cache = { at: Date.now(), data };
-      return data;
-    } finally {
-      inflight = null;
+      if (err instanceof AuthError) {
+        lastAuth = err;
+        continue; // rotate key
+      }
+      throw err; // network / 5xx / 429: rotating cannot help
     }
-  })();
-
-  return inflight;
+  }
+  if (api === null) {
+    keyCache = null; // every candidate 401ed — start over next time
+    throw new Error(
+      `Tavily auth failed for all ${ordered.length} candidate keys: ${lastAuth?.message ?? "?"}`,
+    );
+  }
+  return { ...parseUsage(api as TavilyResponse), api };
 }

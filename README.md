@@ -14,8 +14,8 @@ mira-panel/
 ├── package.json              # workspaces 根：dev / build / start / typecheck / test / fmt
 ├── tsconfig.base.json        # strict + erasableSyntaxOnly + verbatimModuleSyntax + noEmit
 └── packages/
-    ├── shared/   # @mira-panel/shared — PanelState 视图模型类型、展示格式化器、常量（含黄金测试）
-    ├── server/   # @mira-panel/server — Hono 应用 + 四个数据层 + SSR 外壳拼装（Node 24 原生跑 .ts）
+    ├── shared/   # @mira-panel/shared — PanelState 视图模型、WS 订阅契约（topic/消息）、格式化器、常量
+    ├── server/   # @mira-panel/server — Hono 应用 + 订阅 hub + 四个纯取数数据层 + SSR 外壳拼装
     └── web/      # @mira-panel/web  — Vue 3.6 RC 全 Vapor 组件，SSR + 水合
 ```
 
@@ -40,7 +40,7 @@ devShell 提供 `nodejs_24`（原生 type-stripping 跑 `.ts`，无需编译）�
 | `npm run build`             | 产出 `packages/web/dist/client`（含哈希资产的外壳）+ `dist/server`（SSR bundle） |
 | `npm start`                 | 生产：Hono 直接跑（需先 `npm run build`）                                        |
 | `npm run typecheck`         | 三个包串联的 tsc / vue-tsc 检查（运行时不做类型检查，这是唯一门禁）              |
-| `npm test`                  | shared 格式化器 + server 数据层解析的黄金用例（node:test）                       |
+| `npm test`                  | shared 格式化器 + server 数据层解析 + hub 订阅行为的黄金用例（node:test）        |
 | `npm run fmt` / `fmt:check` | oxfmt 全仓格式化 / 校验                                                          |
 
 服务进程管理走 `justfile`：`just status`（监听 + 健康检查）、`just restart`（重启）、
@@ -79,34 +79,36 @@ README，出现在电子纸上就是噪声。
 
 ## 架构要点
 
-- **视图模型单一契约**：服务端 `stateFor()` 把四个数据源归一成 `PanelState`
-  （`packages/shared/src/types.ts`），SSR 渲染它、页面内嵌同 JSON 供水合、
-  `/api/state` 返回同一形状 —— 客户端不做任何取数归一化，保证水合逐字节一致。
+- **视图模型单一契约**：`stateFor()` 从 hub 组装 `PanelState`
+  （`packages/shared/src/types.ts`），SSR 渲染它、页面内嵌同 JSON 供水合；
+  WS 推送与 SSR 嵌入走**同一份投影**（hub 的 `payloadFor`）—— 客户端不做任何
+  取数归一化，保证水合与后续推送显示一致。
 - **全 Vapor 组件**：每个 SFC 都按 Vapor 编译（无虚拟 DOM、细粒度响应式）。
   根组件 `App.vue` 刻意是**双根 fragment**（`<header>` + `.body` 必须是 `.screen`
   网格的直接子元素）；水合走 `createSSRApp + vaporInteropPlugin`（RC 期最稳路径）。
 - **样式是全局 `<link>`**（`epaper.css`），绝不从 JS import —— 无 JS 的访客拿到的
   页面必须可读**且带样式**。
 - **build id 是唯一整页重载触发器**：启动时对三个包的源码 + web 构建产物做
-  size+mtime 哈希，客户端轮询发现变化就自重载。旧的 signature 机制已随 vanilla
-  打补丁脚本一起退役（Vue 响应式本来就能补结构变化；**绝不要**把每次取数都变的
-  字段加进重载判断，那会退化成每分钟自触发的 reload 循环）。
+  size+mtime 哈希，客户端在 WS `hello` 里发现变化就自重载。旧的 signature 机制已随
+  vanilla 打补丁脚本一起退役（Vue 响应式本来就能补结构变化；**绝不要**把每次取数
+  都变的字段加进重载判断，那会退化成每分钟自触发的 reload 循环）。
 - **倒计时是 `(resetMs, state.now)` 的纯函数**：数据层只携带 `resetMs`（epoch ms），
-  展示串由 shared 格式化器在渲染/轮询时现算 —— 比旧版在归一化时预计算更新鲜。
+  展示串由 shared 格式化器在渲染/推送时现算 —— 比旧版在归一化时预计算更新鲜。
 
 ### 路由
 
 | 路径                          | 作用                                                                                                              |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页）                                                                                               |
-| `/glm`                        | GLM 面板（SSR）                                                                                                   |
-| `/vikunja`                    | Vikunja 面板（SSR）                                                                                               |
-| `/api/state`                  | 60 秒轮询用的整面板载荷 `{build, now, glm, vikunja, deepseek, tavily}`（vw/vh/dpr 照旧上报）                      |
-| `/api/usage`                  | `/api/state` 别名（兼容旧链接）                                                                                   |
-| `/api/raw`                    | 四个数据源的完整原始结果 + 客户端视口（调试用）                                                                   |
+| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页，bootstrap 只嵌 rail 所需的瘦切片）                                                             |
+| `/glm`                        | GLM 面板（SSR，bootstrap 含 quota/usage/deepseek/tavily）                                                         |
+| `/vikunja`                    | Vikunja 面板（SSR，bootstrap 含全量任务桶）                                                                       |
+| `/ws`                         | **稳态数据通道**（WebSocket，见「刷新契约」）：页面声明当前 tab 的 topic，hub 按各源自有节奏推送                  |
+| `/api/raw`                    | hub 里每个源的缓存状态（ok/stale/error/原始 payload）+ 客户端视口（调试用）                                       |
 | `/api/vikunja/tasks/:id/done` | **唯一的写路径**（POST）：勾选完成一个任务。要求 `X-Panel-Write: 1` 头，锁定态 403，返回刷新后的 vikunja 视图模型 |
 | `/healthz`                    | `ok`                                                                                                              |
 | `/<file>`                     | 静态文件（`packages/server/public/` 与 web 构建产物）                                                             |
+
+`/api/state`（及 `/api/usage` 别名）已随 60 秒轮询一起退役：稳态数据全部走 `/ws` 推送。
 
 ## 数据来源
 
@@ -171,7 +173,7 @@ GET https://api.deepseek.com/user/balance
   → `agenix/llm-api-keys`（**llm-api-keys 里的那把已失效**，靠 401 轮换兜底：认证失败
   自动换下一把候选，胜者缓存优先复用，全部失败才报错）
 - `balance_infos` 为空 → 卡片显示空态；`is_available:false` → 标「不可用」tag
-- 缓存 **5 分钟**（余额变化慢），出错保旧值标陈旧
+- hub 刷新节奏 **30 分钟**（余额变化慢），出错保旧值标陈旧
 
 ### Tavily 积分（`/glm` 的积分卡）
 
@@ -184,10 +186,10 @@ GET https://api.tavily.com/usage
 - 本机直连超时，请求经**本地 HTTP 代理**走 undici `ProxyAgent`（per-request
   dispatcher，其余数据源不受影响）。代理解析顺序：`TAVILY_PROXY` → `HTTPS_PROXY` →
   `ALL_PROXY`（进程 env）→ hermes-env 文件里的 `ALL_PROXY`/`HTTPS_PROXY` → 直连兜底
-- 端点限频 **10 次/10 分钟** → 服务端缓存恰为 **10 分钟**（60 秒轮询永远命中缓存；
-  锁定态 10 分钟轮询也安全）。撞到 429 只会标陈旧，自愈
+- 端点限频 **10 次/10 分钟** → hub 刷新节奏 **30 分钟**（只在 GLM 页被订阅时才取），
+  远在限频窗口之内。撞到 429 只会标陈旧，自愈
 - **月度重置时间是推导值**：响应里没有时间戳，卡片在渲染时按 `state.now` 算下月 1 日
-  （`nextMonthStart`），随轮询自动推进
+  （`nextMonthStart`），随推送自动推进
 - key 候选链与 401 轮换同 DeepSeek（`TAVILY_API_KEY` env → hermes-env → llm-api-keys）
 
 ### 已知限制
@@ -201,24 +203,52 @@ GET https://api.tavily.com/usage
 - DeepSeek 官方**没有用量端点**（只有余额）；Tavily 的月度重置时间不在响应里，按"下月 1 日"
   推导展示。
 - Tavily `/usage` 与其他 Tavily 消费者**共享同 key 的 10 次/10 分钟限频**；若出现 429，把
-  `tavily.ts` 的 `DATA_TTL_MS` 提到 11 分钟即可。
+  `hub.ts` 里 tavily 源的 `intervalMs` 抬高即可（当前 30 分钟，余量很大）。
 - Vikunja 那边存在**真实重复任务**（同标题同截止、不同 id）—— 面板只是如实显示，去重要在
   Vikunja 侧做。
 
-## 刷新契约（电子纸友好）
+## 刷新契约（声明式订阅，电子纸友好）
 
-- **首屏**：服务端渲染真实数字，**没有 JavaScript 也能读且带样式**
-- **更新**：客户端每 **60 秒** fetch `/api/state`，把整个 `PanelState` 换进响应式系统，
-  Vue 只重绘变化的节点（电子纸上 = 只有变化的数字重刷）；**锁定态降到每 10 分钟**
-- **手动**：右上两个按钮 —— `刷新数据` 立即取数并在 navbar 回执「已刷新 HH:MM:SS」
-  （轻），`刷新页面` 整页重载（电子纸会闪一次）；`锁定/解锁` 见下节
-- **自动整页重载只有一个触发器**：`build` id 变化（服务端代码/构建变了 → 部署无人值守到达）
-- **服务端缓存**：GLM 25 秒、Vikunja 45 秒、DeepSeek 5 分钟、Tavily 10 分钟（= 限频窗口），
-  都有 in-flight 去重，无脑刷不会打爆上游
-- **`/api/state` 载荷因 Vikunja 全量下发而变大**（几百条任务 ≈ 几十 KB/分钟）——局域网
-  内无感，是「翻页总能翻到全部 Todo」的刻意取舍
-- **取数失败时**：保留上一次数值 + 标「⚠ 数据陈旧」；浏览器侧请求失败标「⚠ 请求失败」，
-  绝不整页空白
+- **首屏**：服务端渲染真实数字，**没有 JavaScript 也能读且带样式**。bootstrap 按 tab
+  瘦身：时钟页只嵌 GLM 5 小时池 + Vikunja 计数（≈0.5 KB），Vikunja 全量桶只有
+  `/vikunja` 页才嵌入——旧版「每页整面板 JSON」的几十 KB 没了
+- **稳态 = WebSocket 声明订阅**：页面挂载后连 `/ws`，发送
+  `{"type":"subscribe","tab":…,"locked":…,"vw":…,"vh":…,"dpr":…}`；服务端 hub 把
+  topic 映射到上游取数单元（source），**只有被声明的 source 才有定时器**——深夜
+  无人看屏时上游调用为零，时钟页也永远不会去调 GLM 的 model/tool-usage 端点
+- **topic 粒度刻意细**（`packages/shared/src/topics.ts` 的 `TOPICS_FOR_TAB`）：
+
+  | tab     | 声明的 topic                                                     |
+  | ------- | ---------------------------------------------------------------- |
+  | 时钟    | `glm:rail`（仅 5 小时池）、`vikunja:counts`（仅计数）            |
+  | GLM     | `glm:quota`、`glm:usage`、`vikunja:counts`、`deepseek`、`tavily` |
+  | Vikunja | `glm:rail`、`vikunja:full`（全量桶，只有这个页面收到）           |
+
+- **服务端节奏**（hub.ts 的 `createPanelHub`，锁定态取 locked 列）：
+
+  | source                          | 活跃节奏    | 锁定节奏 |
+  | ------------------------------- | ----------- | -------- |
+  | glm-quota / glm-usage / vikunja | 60 秒       | 10 分钟  |
+  | deepseek / tavily               | **30 分钟** | 30 分钟  |
+
+  多个订阅者共享同一定时器（一次上游取数、按 topic 投影后各自推送）；hub 统一持有
+  缓存、in-flight 去重与 stale-on-error（数据层本身是纯取数函数）
+
+- **更新即推送**：`{"type":"update","topic":…,"now":…,"data":…}`，载荷是**该 topic 的
+  瘦切片**（rail 几十字节；hourly 序列、level、api 原文等 raw-only 字段永不上线）。
+  Vue 只重绘变化的节点（电子纸上 = 只有变化的数字重刷）
+- **手动**：右上两个按钮 —— `刷新数据` 发 `{"type":"refresh"}`（强制一轮取数后回
+  `ack`，navbar 回执「已刷新 HH:MM:SS」），`刷新页面` 整页重载（电子纸会闪一次）；
+  `锁定/解锁` 见下节
+- **自动整页重载只有一个触发器**：`build` id 变化——重连后首条 `hello` 携带，与旧
+  轮询的部署检测同契约
+- **断线**：导航栏标「⚠ 连接断开」，退避重连（1s 起指数翻倍、封顶 30s，浏览器
+  `online` 事件立即重试）；**没有 HTTP 轮询回退**——WS 是唯一稳态通道，设计如此
+- **保活**：服务端每 30 秒发一条 JSON `ping`（浏览器对 WS ping 帧的应答不会唤醒 JS，
+  看门狗只能看到应用层消息）；120 秒无消息判定半开、断开重连。ping 刻意不带
+  `now`——锁定态的倒计时文字不因保活而重绘
+- **取数失败时**：保留上一次数值 + 标「⚠ 数据陈旧」；**首次就失败**的源也会推送
+  错误形状（空切片 + stale 标记），而不是永远沉默——面板绝不整页空白
 
 ## 锁定模式（君子协定）
 
@@ -228,7 +258,8 @@ navbar 右上的 **锁定** 按钮：点击后跳到时钟页并进入锁定态�
   **静默无效**（无提示、无 toast）；**直接访问 `/glm`、`/vikunja` 也会被服务端 302 回
   时钟页**（锁定在 URL 层同样成立）；`刷新数据`/`刷新页面` 同样失效——唯一有效的交互
   就是解锁按钮
-- 数据轮询 60 秒 → **10 分钟**；时钟本身照常每分钟走动（纯客户端，不取数）
+- 数据订阅的节奏切到锁定档（GLM/Vikunja 源 60 秒 → **10 分钟**；DeepSeek/Tavily 本来
+  就是 30 分钟）；时钟本身照常每分钟走动（纯客户端，不取数）
 - 锁定状态存在 **cookie**（`mira-panel-lock=1`），整页重载 / 部署自重载后仍然保持；
   cookie 对 SSR 可读，所以锁定后跳转的时钟页**第一帧就是锁定态**（只闪一次，不会先换
   按钮再换页闪两次）
@@ -278,8 +309,8 @@ navbar 右上的 **锁定** 按钮：点击后跳到时钟页并进入锁定态�
 - **升级 Vue RC 要手动**：`package.json` 精确钉 `3.6.0-rc.11`，升级改版本号后重跑
   截图验收。
 
-诊断手段：60 秒轮询会把 `vw/vh/dpr` 一起报给服务端，服务端日志与 `/api/raw` 的
-`client` 字段都能看到真实视口 —— 布局问题时先查这个，不要靠猜。
+诊断手段：WS 的 subscribe 消息会把 `vw/vh/dpr` 一起报给服务端，服务端日志与 `/api/raw`
+的 `client` 字段都能看到真实视口 —— 布局问题时先查这个，不要靠猜。
 
 ## 验收工作流（改动后照跑一遍）
 
@@ -319,6 +350,8 @@ chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 ## TODO
 
 - [x] npm workspaces monorepo + 全仓 TS + Hono + Vue 3.6 Vapor 重构
+- [x] WebSocket 声明式订阅改造（hub 统一节奏/缓存/投影，`/api/state` 轮询退役，
+      2026-10 已落地）
 - [ ] 持久化：**已决定先保持现状**（Hermes 后台拉起的进程；gateway 重启后需手动重启）
 - [ ] 还能接哪些数据源（Readeck / FreshRSS / HN）
 - [x] Vikunja 触摸勾选完成（`POST /api/vikunja/tasks/:id/done` + 三层防重复提交，

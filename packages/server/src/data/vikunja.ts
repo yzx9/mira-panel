@@ -14,18 +14,21 @@
 // endpoints reject it with "provide a project view ID"); and the web list
 // view is exactly /projects/{id}/views/{viewId}/tasks. Bucketing happens
 // locally over the full result, preserving (project, position) order.
+//
+// The exported functions are pure upstream reads/writes that throw on
+// failure — data caching, cadence and the stale-on-error contract live in
+// the hub. Only the credential/config caches (token, projects, view ids)
+// stay here: they change on nix rebuild timescales, not panel cadences.
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { fmtDate, fmtTime } from "@mira-panel/shared";
 import type { VikunjaCounts } from "@mira-panel/shared";
 
 const API = process.env.VIKUNJA_API ?? "https://todo.example.com/api/v1";
 const PAGE_SIZE = 50; // == the instance's max_items_per_page
 const MAX_PAGES = 10; // safety valve: 500 open tasks means we stop counting
-const TASK_TTL_MS = 45 * 1000;
 const PROJECT_TTL_MS = 10 * 60 * 1000; // also covers the token cache
 const TIMEOUT_MS = 12 * 1000;
 
@@ -46,13 +49,8 @@ export interface VikunjaBuckets {
   later: TaskRaw[];
 }
 
-/** Raw Vikunja payload: everything /api/raw shows, minus any presentation. */
-export interface VikunjaData {
-  ok: boolean;
-  stale: boolean;
-  error: string | null;
-  fetchedAt: string;
-  fetchedDate: string;
+/** Body of the vikunja source: everything /api/raw shows, minus presentation. */
+export interface VikunjaBody {
   counts: VikunjaCounts | null;
   buckets: VikunjaBuckets | null;
   /** True when MAX_PAGES full pages came back — every count is a floor then. */
@@ -69,8 +67,6 @@ interface VikunjaTask {
 
 let tokenCache: { at: number; token: string | null } = { at: 0, token: null };
 let projectCache: { at: number; list: { id: number; title: string }[] } = { at: 0, list: [] };
-let cache: { at: number; data: VikunjaData | null } = { at: 0, data: null };
-let inflight: Promise<VikunjaData> | null = null;
 
 async function readTokenFromFile(path: string): Promise<string | null> {
   try {
@@ -204,8 +200,8 @@ function classify(items: TaskRaw[]): { counts: VikunjaCounts; buckets: VikunjaBu
 const MAX_TASKS = MAX_PAGES * PAGE_SIZE;
 
 /** Default list view per project (position sorting is view-scoped in 2.x).
- *  Cached alongside the projects; null = no usable view, that project falls
- *  back to its plain tasks endpoint sorted by due date. */
+ * Cached alongside the projects; null = no usable view, that project falls
+ * back to its plain tasks endpoint sorted by due date. */
 let viewCache: { at: number; map: Map<number, number | null> } = { at: 0, map: new Map() };
 
 async function defaultViewIds(
@@ -276,77 +272,22 @@ async function fetchAllTasks(
   return { items: out, truncated: false };
 }
 
-/** All undone tasks, cached for 45s with in-flight dedup. */
-export async function getTasks(): Promise<VikunjaData> {
-  if (cache.data && Date.now() - cache.at < TASK_TTL_MS) return cache.data;
-  if (inflight) return inflight;
-
-  inflight = (async (): Promise<VikunjaData> => {
-    try {
-      const key = await token();
-      const projects = await fetchProjects(key);
-      const paged = await fetchAllTasks(key, projects);
-      const names: Record<string, string> = {};
-      for (const p of projects) names[p.id] = p.title;
-      const items = paged.items
-        .map((t) => normalise(t, names))
-        .filter((t) => !t.title.includes("__"));
-      const data: VikunjaData = {
-        ok: true,
-        stale: false,
-        error: null,
-        fetchedAt: fmtTime(new Date()),
-        fetchedDate: fmtDate(new Date()),
-        truncated: paged.truncated,
-        ...classify(items),
-      };
-      cache = { at: Date.now(), data };
-      return data;
-    } catch (err) {
-      const previous = cache.data;
-      const data: VikunjaData = {
-        ...(previous ?? { counts: null, buckets: null, truncated: false }),
-        ok: false,
-        stale: true,
-        error: err instanceof Error ? err.message : String(err),
-        fetchedAt: previous?.fetchedAt ?? "—",
-        fetchedDate: previous?.fetchedDate ?? "",
-      };
-      if (previous) cache = { at: Date.now(), data };
-      return data;
-    } finally {
-      inflight = null;
-    }
-  })();
-
-  return inflight;
+/** All undone tasks, bucketed and counted; throws on failure (the hub marks
+ *  the previous numbers stale). */
+export async function fetchTasks(): Promise<VikunjaBody> {
+  const key = await token();
+  const projects = await fetchProjects(key);
+  const paged = await fetchAllTasks(key, projects);
+  const names: Record<string, string> = {};
+  for (const p of projects) names[p.id] = p.title;
+  const items = paged.items.map((t) => normalise(t, names)).filter((t) => !t.title.includes("__"));
+  return { truncated: paged.truncated, ...classify(items) };
 }
 
-/** Per-task in-flight completions: a double tap shares one request (and
- *  re-marking a done task done is idempotent upstream anyway). */
-const marking = new Map<number, Promise<VikunjaData>>();
-
-/** Complete a task upstream, then serve the refreshed state. */
-export async function markDone(id: number): Promise<VikunjaData> {
-  const existing = marking.get(id);
-  if (existing) return existing;
-
-  const run = (async (): Promise<VikunjaData> => {
-    const key = await token();
-    await api(`/tasks/${id}`, key, { method: "POST", json: { done: true } });
-    // Drain any fetch that started before the PUT landed: the module-level
-    // inflight would otherwise be handed back by the refetch below, answering
-    // with the task still open. Anything started after the PUT already sees
-    // done = true upstream.
-    if (inflight) await inflight;
-    cache = { at: 0, data: null };
-    return getTasks();
-  })();
-
-  marking.set(id, run);
-  try {
-    return await run;
-  } finally {
-    marking.delete(id);
-  }
+/** Complete a task upstream (pure write — re-marking a done task done is
+ *  idempotent). The write route pairs this with a hub force-refresh so the
+ *  answer reflects the change. */
+export async function markTaskDone(id: number): Promise<void> {
+  const key = await token();
+  await api(`/tasks/${id}`, key, { method: "POST", json: { done: true } });
 }

@@ -60,10 +60,11 @@ function onToggleLock(): void {
 // each other (a single pending id would — a lit-but-dead checkbox is a lie).
 const pendingDone = ref(new Set<number>());
 
-// Known accepted race: a poll whose server-side fetch started just before the
-// PUT can land after the splice and resurrect the completed row for up to one
-// poll cycle; the next poll self-heals. Chasing it would mean teaching
-// usePanelState about pendingDone — not worth the coupling.
+// Known accepted race: an update push whose server-side fetch started just
+// before the write can land after this splice and resurrect the completed
+// row — but the write route force-refreshes through the hub (draining that
+// very fetch first), so the corrected push follows within the same burst
+// and self-heals immediately.
 async function onTaskDone(task: TaskRow): Promise<void> {
   // Defense in depth: the server already redirects /vikunja to the clock (and
   // 403s the write route) while locked — this guard covers the gap between

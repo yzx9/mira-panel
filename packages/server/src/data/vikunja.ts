@@ -6,11 +6,14 @@
 //   3. ~/.local/share/hermes/.hermes/.env
 // The token never reaches argv or a log; see the panel README's security notes.
 //
-// Query: a filtered list (`done = false`, sorted by due date), paged 50 at a
-// time — the instance reports max_items_per_page = 50 and silently clamps
-// larger asks, so a single big request would quietly drop tasks (the no-due
-// sentinel sorts first, i.e. exactly the bucket the panel used to miss).
-// Bucketing still happens locally over the full result.
+// Query: the web app's own path — per project, its default LIST VIEW's task
+// list (`done = false`, sorted by `position`, the manual drag order), paged
+// 50 at a time and concatenated. Three upstream facts shape this: the
+// instance clamps per_page to 50 silently (a single big ask drops tasks);
+// position sorting is VIEW-scoped in 2.x (the plain project/global task
+// endpoints reject it with "provide a project view ID"); and the web list
+// view is exactly /projects/{id}/views/{viewId}/tasks. Bucketing happens
+// locally over the full result, preserving (project, position) order.
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -65,7 +68,7 @@ interface VikunjaTask {
 }
 
 let tokenCache: { at: number; token: string | null } = { at: 0, token: null };
-let projectCache: { at: number; map: Record<string, string> } = { at: 0, map: {} };
+let projectCache: { at: number; list: { id: number; title: string }[] } = { at: 0, list: [] };
 let cache: { at: number; data: VikunjaData | null } = { at: 0, data: null };
 let inflight: Promise<VikunjaData> | null = null;
 
@@ -125,13 +128,18 @@ async function api(path: string, key: string, init?: ApiInit): Promise<unknown> 
   return JSON.parse(text);
 }
 
-async function projectNames(key: string): Promise<Record<string, string>> {
-  if (projectCache.map && Date.now() - projectCache.at < PROJECT_TTL_MS) return projectCache.map;
+/** Projects (id + title), cached alongside the token. The list also drives
+ *  the per-project task walk — order defines the within-bucket grouping. */
+async function fetchProjects(key: string): Promise<{ id: number; title: string }[]> {
+  if (projectCache.list.length > 0 && Date.now() - projectCache.at < PROJECT_TTL_MS)
+    return projectCache.list;
   const projects = (await api("/projects", key)) as { id: number; title?: string }[];
-  const map: Record<string, string> = {};
-  for (const p of Array.isArray(projects) ? projects : []) map[p.id] = p.title ?? "";
-  projectCache = { at: Date.now(), map };
-  return map;
+  const list = (Array.isArray(projects) ? projects : []).map((p) => ({
+    id: p.id,
+    title: (p.title ?? "").trim(),
+  }));
+  projectCache = { at: Date.now(), list };
+  return list;
 }
 
 const pad = (n: number): string => String(n).padStart(2, "0");
@@ -180,8 +188,6 @@ function classify(items: TaskRaw[]): { counts: VikunjaCounts; buckets: VikunjaBu
     else if (t.dueMs <= horizon.getTime()) buckets.soon.push(t);
     else buckets.later.push(t);
   }
-  // Overdue: newest first is far more useful than the oldest backlog item.
-  buckets.overdue.reverse();
 
   const counts: VikunjaCounts = {
     today: buckets.today.length,
@@ -194,30 +200,80 @@ function classify(items: TaskRaw[]): { counts: VikunjaCounts; buckets: VikunjaBu
   return { counts, buckets };
 }
 
-/** Page through all undone tasks: PAGE_SIZE per request, stopping at the
- *  first short page. A non-array page counts as short (same leniency the
- *  single-request version had). MAX_PAGES full pages = truncated. */
-async function fetchAllTasks(key: string): Promise<{ items: VikunjaTask[]; truncated: boolean }> {
+/** Grand-total safety valve across the per-project walk. */
+const MAX_TASKS = MAX_PAGES * PAGE_SIZE;
+
+/** Default list view per project (position sorting is view-scoped in 2.x).
+ *  Cached alongside the projects; null = no usable view, that project falls
+ *  back to its plain tasks endpoint sorted by due date. */
+let viewCache: { at: number; map: Map<number, number | null> } = { at: 0, map: new Map() };
+
+async function defaultViewIds(
+  key: string,
+  projects: { id: number }[],
+): Promise<Map<number, number | null>> {
+  if (viewCache.map.size > 0 && Date.now() - viewCache.at < PROJECT_TTL_MS) return viewCache.map;
+  const map = new Map<number, number | null>();
+  await Promise.all(
+    projects.map(async (p) => {
+      try {
+        const views = (await api(`/projects/${p.id}/views`, key)) as {
+          id?: number;
+          view_kind?: string;
+        }[];
+        const list = Array.isArray(views) ? views : [];
+        const pick = list.find((v) => v.view_kind === "list") ?? list[0];
+        map.set(p.id, pick?.id ?? null);
+      } catch {
+        map.set(p.id, null);
+      }
+    }),
+  );
+  viewCache = { at: Date.now(), map };
+  return map;
+}
+
+/** Walk every project's default list view and page through its undone
+ *  tasks, `position` first (the web app's manual drag order). A non-array
+ *  page counts as short (same leniency the single-request version had).
+ *  Hitting MAX_TASKS, or one view alone filling MAX_PAGES, flags truncated. */
+async function fetchAllTasks(
+  key: string,
+  projects: { id: number; title: string }[],
+): Promise<{ items: VikunjaTask[]; truncated: boolean }> {
+  const views = await defaultViewIds(key, projects);
   const out: VikunjaTask[] = [];
   const filter = encodeURIComponent("done = false");
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    let res: unknown;
-    try {
-      res = await api(
-        `/tasks?filter=${filter}&sort_by=due_date&order_by=asc&per_page=${PAGE_SIZE}&page=${page}`,
-        key,
-      );
-    } catch (err) {
-      // Some Vikunja builds answer a beyond-last-page read with 404 (others
-      // return []) — for page > 1 that means "no more rows", not a failure.
-      if (page > 1 && err instanceof Error && err.message.startsWith("HTTP 404")) break;
-      throw err;
+  for (const project of projects) {
+    // Pseudo projects (Favorites and friends) carry negative ids and no
+    // tasks of their own — their content is other projects', already walked.
+    if (project.id < 0) continue;
+    const view = views.get(project.id) ?? null;
+    const base = view
+      ? `/projects/${project.id}/views/${view}/tasks`
+      : `/projects/${project.id}/tasks`;
+    const sort = view ? "position" : "due_date";
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      let res: unknown;
+      try {
+        res = await api(
+          `${base}?filter=${filter}&sort_by=${sort}&order_by=asc&per_page=${PAGE_SIZE}&page=${page}`,
+          key,
+        );
+      } catch (err) {
+        // Some Vikunja builds answer a beyond-last-page read with 404 (others
+        // return []) — for page > 1 that means "no more rows", not a failure.
+        if (page > 1 && err instanceof Error && err.message.startsWith("HTTP 404")) break;
+        throw err;
+      }
+      const rows = Array.isArray(res) ? (res as VikunjaTask[]) : [];
+      out.push(...rows);
+      if (out.length >= MAX_TASKS) return { items: out, truncated: true };
+      if (rows.length < PAGE_SIZE) break; // view exhausted
+      if (page === MAX_PAGES) return { items: out, truncated: true };
     }
-    const rows = Array.isArray(res) ? (res as VikunjaTask[]) : [];
-    out.push(...rows);
-    if (rows.length < PAGE_SIZE) return { items: out, truncated: false };
   }
-  return { items: out, truncated: true };
+  return { items: out, truncated: false };
 }
 
 /** All undone tasks, cached for 45s with in-flight dedup. */
@@ -228,9 +284,12 @@ export async function getTasks(): Promise<VikunjaData> {
   inflight = (async (): Promise<VikunjaData> => {
     try {
       const key = await token();
-      const [paged, projects] = await Promise.all([fetchAllTasks(key), projectNames(key)]);
+      const projects = await fetchProjects(key);
+      const paged = await fetchAllTasks(key, projects);
+      const names: Record<string, string> = {};
+      for (const p of projects) names[p.id] = p.title;
       const items = paged.items
-        .map((t) => normalise(t, projects))
+        .map((t) => normalise(t, names))
         .filter((t) => !t.title.includes("__"));
       const data: VikunjaData = {
         ok: true,

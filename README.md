@@ -136,19 +136,21 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
 
 ```
 GET https://todo.example.com/api/v1/projects
-GET /api/v1/tasks?filter=done = false&sort_by=due_date&order_by=asc&per_page=50&page=N
+GET /api/v1/projects/{id}/tasks?filter=done = false&sort_by=position&order_by=asc&per_page=50&page=N
 ```
 
 - `Authorization: Bearer <token>`，token 运行时按顺序解析：`VIKUNJA_API_KEY` 环境变量 →
   `${XDG_RUNTIME_DIR}/agenix/vikunja-env`（agenix 解密）→ Hermes 的 `.env`
-- **分页拉全**：实例 `max_items_per_page = 50`，更大的 `per_page` 会被**静默钳到 50**
-  （go-vikunja/vikunja#2239），所以按 50 一页循环拉到短页为止（上限 10 页 = 500 条，
-  触顶时汇总条标注「已达分页上限」）
+- **逐项目分页拉全**：实例 `max_items_per_page = 50`，更大的 `per_page` 会被**静默钳到
+  50**（go-vikunja/vikunja#2239）；且 `position` 排序**只在项目上下文可用**（全局
+  `/tasks` 会 400 要求 project view id）。所以先取项目列表、再逐项目按 50/页拉到短页、
+  按（项目, position）拼接；累计上限 500 条，触顶时汇总条标注「已达分页上限」
 - **分桶在本地做**：逾期 / 今日 / 未来 7 天 / 无截止日期 / 7 天以后，五个桶**全量下发**，
   前端任务卡本地翻页（翻页零请求）
 - `due_date` 为 `0001-01-01T00:00:00Z` 是 Vikunja 的"没有截止时间"哨兵值
   （`asc` 排序下排最前——这正是当年单次大请求被钳时最先丢的那批）
-- 逾期列表按**最近到期优先**排序
+- **桶内顺序 = Vikunja 网页端的默认顺序**（`sort_by=position`，即手动拖拽序），
+  分桶只做分组、不打乱组内顺序
 - **触摸勾选完成**：任务行首的方框 → `POST /api/vikunja/tasks/:id/done` → 服务端
   `POST /api/v1/tasks/{id}` + JSON body `{"done":true}`。两个坑都有案底（已在本
   实例验证）：**v1 的更新动词是 POST**（2.x 起 PUT/PATCH 一律 405——社区旧帖里的

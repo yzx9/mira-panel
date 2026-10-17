@@ -325,9 +325,13 @@ button:active {
 
 /* Taller task rows: the checkbox is a touch target, so rows need air between
    them — adjacent-row mis-taps were real on the kiosk. Scoped to the task
-   table; the GLM tables keep their compact 5px rhythm. */
+   table; the GLM tables keep their compact 5px rhythm. Only the vertical
+   padding is set: a padding SHORTHAND here would out-rank the global
+   td.num/.proj/.chk left/right padding (equal specificity, later wins) and
+   glue the project label to the due label. */
 .vk-list table.rows td {
-  padding: 14px 0;
+  padding-top: 14px;
+  padding-bottom: 14px;
   vertical-align: middle;
 }
 

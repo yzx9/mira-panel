@@ -284,6 +284,94 @@ button:active {
   color: #fff;
 }
 
+/* ------------------------------------------------------ vikunja page */
+/* One wrapper = one main grid cell spanning both columns, so the two rows
+   size as intended: the summary strip keeps its content height (auto row),
+   the task card takes everything else (1fr). Alone in its row, the wrapper
+   may carry min-height: 0 — the card-level pitfall needs two siblings. */
+.vk {
+  grid-column: span 2;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 14px;
+  min-height: 0;
+}
+
+.vk-strip {
+  display: flex;
+  justify-content: space-around;
+  gap: 14px;
+}
+.vk-strip .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vk-strip .stat b {
+  font-size: 48px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+/* The task card swaps .card's column flex for a two-column grid: table left,
+   pager column right. .vk-list is the only card in its row, so a fixed pager
+   width never reflows anything else. */
+.vk-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  min-height: 0;
+}
+
+/* Taller task rows: the checkbox is a touch target, so rows need air between
+   them — adjacent-row mis-taps were real on the kiosk. Scoped to the task
+   table; the GLM tables keep their compact 5px rhythm. */
+.vk-list table.rows td {
+  padding: 14px 0;
+  vertical-align: middle;
+}
+
+/* A sparse page (the last one, usually) must not stretch its rows: as a grid
+   item the table defaults to stretch, and a CSS table taller than its
+   content distributes the extra height into the rows — every row balloons.
+   Content height, top of the cell; the pager column keeps spanning full. */
+.vk-list table.rows {
+  align-self: start;
+}
+
+/* Page turners: big squares, one-bit feedback via the global :active
+   inversion. At a boundary the button hides — e-paper has no honest
+   disabled shade (grey is banned) and a dead lit button is a lie — but a
+   same-size invisible pad keeps the slot, so the indicator stays pinned
+   to the middle and the column never shifts. */
+.pager {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+.pager button,
+.pager .pad {
+  width: 84px;
+  height: 84px;
+}
+.pager button {
+  padding: 0;
+  font-size: 44px;
+  line-height: 1;
+}
+.pager .page-ind {
+  font-size: 30px;
+  font-weight: 900;
+}
+
+/* Group headers inside the task table: heavier rule + bold, count in a chip. */
+tr.row-header td {
+  border-top: 5px solid #000;
+  font-weight: 900;
+}
+
 /* ------------------------------------------------------ clock page */
 /* One wide card: the minute hand is the page, the date sits under it in
    small print ("2026年10月15日 星期四"). */

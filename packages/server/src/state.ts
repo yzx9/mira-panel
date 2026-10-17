@@ -5,10 +5,6 @@
 // pass and the 60s poll display-identical.
 
 import {
-  CAP_OVERDUE,
-  CAP_SOON,
-  CAP_TODAY,
-  type Bucket,
   type DeepSeekState,
   type GlmState,
   type PanelState,
@@ -22,14 +18,9 @@ import { getTavilyUsage, type TavilyData } from "./data/tavily.ts";
 import { getUsage, type GlmData } from "./data/usage.ts";
 import { getTasks, type TaskRaw, type VikunjaData } from "./data/vikunja.ts";
 
-/** Cap a bucket to its visible rows; `more` counts what was cut off. */
-function capRows(rows: TaskRaw[], cap: number): Bucket {
-  return {
-    rows: rows
-      .slice(0, cap)
-      .map((t): TaskRow => ({ id: t.id, title: t.title, project: t.project, when: t.when })),
-    more: Math.max(0, rows.length - cap),
-  };
+/** Map a raw task to its wire row (drops the fields only classification uses). */
+function toRow(t: TaskRaw): TaskRow {
+  return { id: t.id, title: t.title, project: t.project, when: t.when };
 }
 
 function glmState(d: GlmData): GlmState {
@@ -61,18 +52,24 @@ function glmState(d: GlmData): GlmState {
   };
 }
 
-function vikunjaState(d: VikunjaData): VikunjaState {
+/** Build the /vikunja view-model: every bucket goes out in full — the
+ *  client's task card pages locally. Exported for the write route, which
+ *  answers with this same shape after a completion. */
+export function vikunjaState(d: VikunjaData): VikunjaState {
   return {
     ok: d.ok,
     stale: d.stale,
     error: d.error,
     fetchedAt: d.fetchedAt,
     counts: d.counts,
+    truncated: d.truncated,
     buckets: d.buckets
       ? {
-          today: capRows(d.buckets.today, CAP_TODAY),
-          soon: capRows(d.buckets.soon, CAP_SOON),
-          overdue: capRows(d.buckets.overdue, CAP_OVERDUE),
+          today: d.buckets.today.map(toRow),
+          soon: d.buckets.soon.map(toRow),
+          overdue: d.buckets.overdue.map(toRow),
+          noDue: d.buckets.noDue.map(toRow),
+          later: d.buckets.later.map(toRow),
         }
       : null,
   };

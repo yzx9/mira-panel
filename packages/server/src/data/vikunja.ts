@@ -6,9 +6,11 @@
 //   3. ~/.local/share/hermes/.hermes/.env
 // The token never reaches argv or a log; see the panel README's security notes.
 //
-// Query: one filtered list request (`done = false`, sorted by due date) is
-// enough for a glance panel — bucketing happens locally so a single round trip
-// covers today / next 7 days / overdue / no due date.
+// Query: a filtered list (`done = false`, sorted by due date), paged 50 at a
+// time — the instance reports max_items_per_page = 50 and silently clamps
+// larger asks, so a single big request would quietly drop tasks (the no-due
+// sentinel sorts first, i.e. exactly the bucket the panel used to miss).
+// Bucketing still happens locally over the full result.
 
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -18,7 +20,8 @@ import { fmtDate, fmtTime } from "@mira-panel/shared";
 import type { VikunjaCounts } from "@mira-panel/shared";
 
 const API = process.env.VIKUNJA_API ?? "https://todo.example.com/api/v1";
-const PER_PAGE = 200;
+const PAGE_SIZE = 50; // == the instance's max_items_per_page
+const MAX_PAGES = 10; // safety valve: 500 open tasks means we stop counting
 const TASK_TTL_MS = 45 * 1000;
 const PROJECT_TTL_MS = 10 * 60 * 1000; // also covers the token cache
 const TIMEOUT_MS = 12 * 1000;
@@ -49,6 +52,8 @@ export interface VikunjaData {
   fetchedDate: string;
   counts: VikunjaCounts | null;
   buckets: VikunjaBuckets | null;
+  /** True when MAX_PAGES full pages came back — every count is a floor then. */
+  truncated: boolean;
 }
 
 interface VikunjaTask {
@@ -174,6 +179,24 @@ function classify(items: TaskRaw[]): { counts: VikunjaCounts; buckets: VikunjaBu
   return { counts, buckets };
 }
 
+/** Page through all undone tasks: PAGE_SIZE per request, stopping at the
+ *  first short page. A non-array page counts as short (same leniency the
+ *  single-request version had). MAX_PAGES full pages = truncated. */
+async function fetchAllTasks(key: string): Promise<{ items: VikunjaTask[]; truncated: boolean }> {
+  const out: VikunjaTask[] = [];
+  const filter = encodeURIComponent("done = false");
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await api(
+      `/tasks?filter=${filter}&sort_by=due_date&order_by=asc&per_page=${PAGE_SIZE}&page=${page}`,
+      key,
+    );
+    const rows = Array.isArray(res) ? (res as VikunjaTask[]) : [];
+    out.push(...rows);
+    if (rows.length < PAGE_SIZE) return { items: out, truncated: false };
+  }
+  return { items: out, truncated: true };
+}
+
 /** All undone tasks, cached for 45s with in-flight dedup. */
 export async function getTasks(): Promise<VikunjaData> {
   if (cache.data && Date.now() - cache.at < TASK_TTL_MS) return cache.data;
@@ -182,14 +205,8 @@ export async function getTasks(): Promise<VikunjaData> {
   inflight = (async (): Promise<VikunjaData> => {
     try {
       const key = await token();
-      const [tasks, projects] = await Promise.all([
-        api(
-          `/tasks?filter=${encodeURIComponent("done = false")}&sort_by=due_date&order_by=asc&per_page=${PER_PAGE}`,
-          key,
-        ),
-        projectNames(key),
-      ]);
-      const items = ((Array.isArray(tasks) ? tasks : []) as VikunjaTask[])
+      const [paged, projects] = await Promise.all([fetchAllTasks(key), projectNames(key)]);
+      const items = paged.items
         .map((t) => normalise(t, projects))
         .filter((t) => !t.title.includes("__"));
       const data: VikunjaData = {
@@ -198,6 +215,7 @@ export async function getTasks(): Promise<VikunjaData> {
         error: null,
         fetchedAt: fmtTime(new Date()),
         fetchedDate: fmtDate(new Date()),
+        truncated: paged.truncated,
         ...classify(items),
       };
       cache = { at: Date.now(), data };
@@ -205,7 +223,7 @@ export async function getTasks(): Promise<VikunjaData> {
     } catch (err) {
       const previous = cache.data;
       const data: VikunjaData = {
-        ...(previous ?? { counts: null, buckets: null }),
+        ...(previous ?? { counts: null, buckets: null, truncated: false }),
         ok: false,
         stale: true,
         error: err instanceof Error ? err.message : String(err),

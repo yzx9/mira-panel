@@ -1,9 +1,12 @@
 <script setup vapor lang="ts">
+// Two rows, per the kiosk's tight content budget: a horizontal summary strip
+// on top, the full paged task card below. Both live in one wrapper so main's
+// stretch gives the strip its content height and the list the rest.
 import type { VikunjaState } from "@mira-panel/shared";
-import TaskBucketCard from "./TaskBucketCard.vue";
-import VkSummaryCard from "./VkSummaryCard.vue";
+import TaskListCard from "./TaskListCard.vue";
+import VkSummaryStrip from "./VkSummaryStrip.vue";
 
-defineProps<{ vikunja: VikunjaState }>();
+defineProps<{ vikunja: VikunjaState; locked: boolean }>();
 </script>
 
 <template>
@@ -11,24 +14,9 @@ defineProps<{ vikunja: VikunjaState }>();
     <h2>Vikunja</h2>
     <div class="empty">取数失败：{{ vikunja.error ?? "未知错误" }}</div>
   </section>
-
   <!-- buckets non-null implies counts non-null (server invariant). -->
-  <template v-else>
-    <TaskBucketCard
-      title="今日到期"
-      :count="vikunja.counts!.today"
-      :bucket="vikunja.buckets.today"
-    />
-    <TaskBucketCard
-      title="未来 7 天"
-      :count="vikunja.counts!.soon"
-      :bucket="vikunja.buckets.soon"
-    />
-    <TaskBucketCard
-      title="逾期"
-      :count="vikunja.counts!.overdue"
-      :bucket="vikunja.buckets.overdue"
-    />
-    <VkSummaryCard :counts="vikunja.counts!" />
-  </template>
+  <div v-else class="vk">
+    <VkSummaryStrip :counts="vikunja.counts!" :truncated="vikunja.truncated" />
+    <TaskListCard :buckets="vikunja.buckets" :locked="locked" />
+  </div>
 </template>

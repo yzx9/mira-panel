@@ -83,7 +83,7 @@ function onToggleLock(): void {
         :deepseek="state.deepseek"
         :tavily="state.tavily"
       />
-      <VikunjaDetail v-else :vikunja="state.vikunja" />
+      <VikunjaDetail v-else :vikunja="state.vikunja" :locked="locked" />
     </main>
   </div>
 </template>

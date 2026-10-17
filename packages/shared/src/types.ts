@@ -81,12 +81,6 @@ export interface TaskRow {
   when: string;
 }
 
-/** Rows already capped server-side; `more` counts what was cut off. */
-export interface Bucket {
-  rows: TaskRow[];
-  more: number;
-}
-
 export interface VikunjaCounts {
   today: number;
   soon: number;
@@ -99,7 +93,18 @@ export interface VikunjaCounts {
 export interface VikunjaState extends Health {
   /** null when no fetch ever succeeded (panel shows the failure card). */
   counts: VikunjaCounts | null;
-  buckets: { today: Bucket; soon: Bucket; overdue: Bucket } | null;
+  /** Full row list per bucket — nothing is truncated server-side; the
+   *  client's task card pages through them locally. */
+  buckets: {
+    today: TaskRow[];
+    soon: TaskRow[];
+    overdue: TaskRow[];
+    noDue: TaskRow[];
+    later: TaskRow[];
+  } | null;
+  /** True when the upstream paged fetch hit MAX_PAGES: every count and
+   *  bucket below is a floor, not the whole truth. */
+  truncated: boolean;
 }
 
 export interface DeepSeekBalance {

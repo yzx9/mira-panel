@@ -65,7 +65,8 @@ rail  │  detail（当前 tab 的完整内容）
  用量 │            今天模型用量（含工具调用行）、DeepSeek 余额、
       │            Tavily 积分、周额度（账号有则显示）
 ──────│
-Vikunja│ /vikunja 今日到期、未来 7 天、逾期、汇总（未完成 / 无期限 / 7 天以后）
+Vikunja│ /vikunja 汇总条（未完成 / 今日 / 未来 7 天 / 逾期 / 无截止 / 以后）、
+      │          全量任务列表（按桶分组，卡右缘 ▲/▼ 翻页，不滚动）
 ```
 
 **面板上只放数据，不放开发者说明或操作提示** —— 密钥怎么来、缓存多少秒这类文字只属于
@@ -134,13 +135,18 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
 
 ```
 GET https://todo.example.com/api/v1/projects
-GET /api/v1/tasks?filter=done = false&sort_by=due_date&order_by=asc&per_page=200
+GET /api/v1/tasks?filter=done = false&sort_by=due_date&order_by=asc&per_page=50&page=N
 ```
 
 - `Authorization: Bearer <token>`，token 运行时按顺序解析：`VIKUNJA_API_KEY` 环境变量 →
   `${XDG_RUNTIME_DIR}/agenix/vikunja-env`（agenix 解密）→ Hermes 的 `.env`
-- 一次筛选查询拿全部未完成任务，**分桶在本地做**：今日 / 未来 7 天 / 逾期 / 无截止日期 / 7 天以后
+- **分页拉全**：实例 `max_items_per_page = 50`，更大的 `per_page` 会被**静默钳到 50**
+  （go-vikunja/vikunja#2239），所以按 50 一页循环拉到短页为止（上限 10 页 = 500 条，
+  触顶时汇总条标注「已达分页上限」）
+- **分桶在本地做**：逾期 / 今日 / 未来 7 天 / 无截止日期 / 7 天以后，五个桶**全量下发**，
+  前端任务卡本地翻页（翻页零请求）
 - `due_date` 为 `0001-01-01T00:00:00Z` 是 Vikunja 的"没有截止时间"哨兵值
+  （`asc` 排序下排最前——这正是当年单次大请求被钳时最先丢的那批）
 - 逾期列表按**最近到期优先**排序
 
 ### DeepSeek 余额（`/glm` 的余额卡）
@@ -199,6 +205,8 @@ GET https://api.tavily.com/usage
 - **自动整页重载只有一个触发器**：`build` id 变化（服务端代码/构建变了 → 部署无人值守到达）
 - **服务端缓存**：GLM 25 秒、Vikunja 45 秒、DeepSeek 5 分钟、Tavily 10 分钟（= 限频窗口），
   都有 in-flight 去重，无脑刷不会打爆上游
+- **`/api/state` 载荷因 Vikunja 全量下发而变大**（几百条任务 ≈ 几十 KB/分钟）——局域网
+  内无感，是「翻页总能翻到全部 Todo」的刻意取舍
 - **取数失败时**：保留上一次数值 + 标「⚠ 数据陈旧」；浏览器侧请求失败标「⚠ 请求失败」，
   绝不整页空白
 

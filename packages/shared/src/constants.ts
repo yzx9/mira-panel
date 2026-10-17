@@ -13,8 +13,8 @@ export const POLL_MS = 60_000;
 // still ticks every minute (client-side, no fetch).
 export const LOCK_POLL_MS = 10 * 60_000;
 
-// How many task rows each Vikunja bucket table shows before the "另有 N 项"
-// note. Counts in the card headers always show the full numbers.
-export const CAP_TODAY = 7;
-export const CAP_SOON = 7;
-export const CAP_OVERDUE = 5;
+// Row slots the /vikunja task card shows per page: one slot per task row or
+// per bucket header. Tuned for the 2200x1650 canvas WITH the kiosk's airy
+// 14px row padding (mis-taps on adjacent rows were real at a tighter
+// rhythm); paging is client-side over the full bucket lists.
+export const LIST_PAGE_ROWS = 14;

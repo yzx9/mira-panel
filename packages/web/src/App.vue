@@ -115,7 +115,12 @@ async function onTaskDone(task: TaskRow): Promise<void> {
       :clock-now="clockNow"
       :locked="locked"
     />
-    <main>
+    <!-- .spread (GLM only): borderless blocks hug their content and the rows
+         spread the slack evenly — a stretched card would pool it invisibly at
+         its bottom and read as an uneven gap. Clock and Vikunja keep the
+         default stretch: the clock centers in its full-height card and the
+         vk task card must reach the bottom edge for the pager. -->
+    <main :class="{ spread: tab === 'glm' }">
       <ClockDetail v-if="tab === 'clock'" :clock-now="clockNow" />
       <GlmDetail
         v-else-if="tab === 'glm'"

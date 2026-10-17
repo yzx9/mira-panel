@@ -9,6 +9,8 @@ import { serve } from "@hono/node-server";
 
 import { createApp, type RenderPage } from "./app.ts";
 import { computeBuildId } from "./buildId.ts";
+import { getDeepSeekBalance } from "./data/deepseek.ts";
+import { getTavilyUsage } from "./data/tavily.ts";
 import { assemble, assertMarkers, tabTitle } from "./template.ts";
 import { lastViewport } from "./viewport.ts";
 
@@ -54,3 +56,10 @@ const app = createApp({ build, renderPage, staticRoots, clientInfo: lastViewport
 serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
   process.stdout.write(`[mira-panel] panel on http://${HOST}:${PORT}/ (build ${build})\n`);
 });
+
+// Warm the slow sources at boot: Tavily pays a proxy round trip and DeepSeek
+// may rotate keys on the first call — do it before the first SSR pass, not
+// during it. Cache TTLs make this exactly one request per restart; both
+// layers resolve (never reject), so fire-and-forget is safe.
+void getDeepSeekBalance();
+void getTavilyUsage();

@@ -15,10 +15,20 @@ defineProps<{ usage: UsageSummary }>();
       >
     </div>
     <table class="rows">
+      <!-- One explicit <tbody> per v-for: vapor's fragment anchors must each
+           live inside their own table section or hydration mis-claims rows. -->
       <tbody>
         <tr v-for="m in usage.models" :key="m.name">
           <td>{{ m.name }}</td>
           <td class="num">{{ fmtTokens(m.tokens) }}</td>
+        </tr>
+      </tbody>
+      <!-- Tool rows moved in from the deleted ToolsCard (联网搜索/网页读取/
+           开源仓库) — same data source, one card fewer. -->
+      <tbody>
+        <tr v-for="t in usage.tools" :key="t.name">
+          <td>{{ t.name }}</td>
+          <td class="num">{{ fmtInt(t.count) }}</td>
         </tr>
       </tbody>
     </table>

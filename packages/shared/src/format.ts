@@ -30,6 +30,24 @@ export function fmtTokens(n: number): string {
 /** Locale is pinned: bare toLocaleString() drifts between Node and Firefox. */
 export const fmtInt = (n: number): string => (Number.isFinite(n) ? n.toLocaleString("en-US") : "—");
 
+const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };
+
+/** 20.28 -> "¥20.28"; toFixed is locale-free, so Node and Firefox agree
+ *  byte-for-byte (same pinning rationale as fmtInt's explicit "en-US"). */
+export function fmtMoney(n: number, currency = "CNY"): string {
+  if (!Number.isFinite(n)) return "—";
+  const symbol = CURRENCY_SYMBOLS[currency] ?? `${currency} `;
+  return `${symbol}${n.toFixed(2)}`;
+}
+
+/** Epoch ms of the next local 1st-of-month 00:00 after `now`. Tavily resets
+ *  calendar-monthly but sends no timestamp, so the card derives the target
+ *  from state.now at render time — pure, hydration-exact, advances per poll. */
+export function nextMonthStart(now: number): number {
+  const d = new Date(now);
+  return new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+}
+
 /** Reset moment: "HH:MM" within 24h, "M-DD HH:MM" beyond, "未知" when absent. */
 export function resetAtText(resetMs: number | null, now: number): string {
   if (resetMs === null || !Number.isFinite(resetMs)) return "未知";

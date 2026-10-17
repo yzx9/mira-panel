@@ -11,7 +11,7 @@
     "build": "npm run build -w @mira-panel/web",
     "start": "npm run start -w @mira-panel/server",
     "typecheck": "npm run typecheck -w @mira-panel/shared && npm run typecheck -w @mira-panel/server && npm run typecheck -w @mira-panel/web",
-    "test": "npm run test -w @mira-panel/shared",
+    "test": "npm run test -w @mira-panel/shared && npm run test -w @mira-panel/server",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check ."
   },

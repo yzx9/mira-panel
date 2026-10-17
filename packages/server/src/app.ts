@@ -8,6 +8,8 @@ import type { Context } from "hono";
 
 import type { PanelState, TabId } from "@mira-panel/shared";
 
+import { getDeepSeekBalance } from "./data/deepseek.ts";
+import { getTavilyUsage } from "./data/tavily.ts";
 import { getUsage } from "./data/usage.ts";
 import { getTasks } from "./data/vikunja.ts";
 import { serveStatic, type StaticResult } from "./staticFiles.ts";
@@ -89,10 +91,15 @@ export function createApp(deps: AppDeps): Hono {
   app.get("/api/state", apiState);
   app.get("/api/usage", apiState);
 
-  // Debug view: full raw payload for both sources + client viewport.
+  // Debug view: full raw payload for all four sources + client viewport.
   app.get("/api/raw", async (c) => {
-    const [glm, tasks] = await Promise.all([getUsage(), getTasks()]);
-    return c.json({ glm, tasks, client: deps.clientInfo() });
+    const [glm, tasks, deepseek, tavily] = await Promise.all([
+      getUsage(),
+      getTasks(),
+      getDeepSeekBalance(),
+      getTavilyUsage(),
+    ]);
+    return c.json({ glm, tasks, deepseek, tavily, client: deps.clientInfo() });
   });
 
   // Static fallback, registered last so /index.html is never served raw.

@@ -1,15 +1,17 @@
 <script setup vapor lang="ts">
-// GLM tab body: hero + MCP + usage + tools + weekly/status, each with the old
+// GLM tab body: hero + MCP + model usage (with the tool rows merged in) +
+// the DeepSeek/Tavily provider cards + weekly, each with the established
 // hide-missing-pool behavior (an absent quota item renders a labelled empty
-// card, never a blank frame).
-import type { GlmState } from "@mira-panel/shared";
+// card, never a blank frame; the weekly card simply vanishes when absent).
+import type { DeepSeekState, GlmState, TavilyState } from "@mira-panel/shared";
+import DeepSeekCard from "./DeepSeekCard.vue";
 import HeroCard from "./HeroCard.vue";
 import McpCard from "./McpCard.vue";
 import ModelUsageCard from "./ModelUsageCard.vue";
-import ToolsCard from "./ToolsCard.vue";
-import WeeklyOrStatusCard from "./WeeklyOrStatusCard.vue";
+import TavilyCard from "./TavilyCard.vue";
+import WeeklyCard from "./WeeklyCard.vue";
 
-defineProps<{ glm: GlmState; now: number }>();
+defineProps<{ glm: GlmState; now: number; deepseek: DeepSeekState; tavily: TavilyState }>();
 </script>
 
 <template>
@@ -31,11 +33,8 @@ defineProps<{ glm: GlmState; now: number }>();
     <div class="empty">暂不可用</div>
   </section>
 
-  <ToolsCard v-if="glm.usage" :usage="glm.usage" />
-  <section v-else class="card">
-    <h2>工具调用</h2>
-    <div class="empty">暂不可用</div>
-  </section>
+  <DeepSeekCard :ds="deepseek" />
+  <TavilyCard :tv="tavily" :now="now" />
 
-  <WeeklyOrStatusCard :glm="glm" :now="now" />
+  <WeeklyCard v-if="glm.weekly" :weekly="glm.weekly" :now="now" />
 </template>

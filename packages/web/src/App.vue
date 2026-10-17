@@ -76,7 +76,13 @@ function onToggleLock(): void {
     />
     <main>
       <ClockDetail v-if="tab === 'clock'" :clock-now="clockNow" />
-      <GlmDetail v-else-if="tab === 'glm'" :glm="state.glm" :now="state.now" />
+      <GlmDetail
+        v-else-if="tab === 'glm'"
+        :glm="state.glm"
+        :now="state.now"
+        :deepseek="state.deepseek"
+        :tavily="state.tavily"
+      />
       <VikunjaDetail v-else :vikunja="state.vikunja" />
     </main>
   </div>

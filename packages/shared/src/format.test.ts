@@ -7,10 +7,12 @@ import {
   fmtCountdown,
   fmtDate,
   fmtInt,
+  fmtMoney,
   fmtMonthDay,
   fmtTime,
   fmtTokens,
   fmtWeekday,
+  nextMonthStart,
   resetAtText,
   resetInText,
 } from "./format.ts";
@@ -65,4 +67,26 @@ test("fmtMonthDay / fmtWeekday feed the clock date wall", () => {
   assert.equal(fmtMonthDay(new Date(2026, 0, 4)), "1月4日");
   assert.equal(fmtWeekday(new Date(2026, 9, 15)), "星期四");
   assert.equal(fmtWeekday(new Date(2026, 9, 18)), "星期日");
+});
+
+test("fmtMoney pins two decimals behind a currency symbol", () => {
+  assert.equal(fmtMoney(20.28), "¥20.28"); // live DeepSeek payload
+  assert.equal(fmtMoney(9.3), "¥9.30"); // trailing zero kept
+  assert.equal(fmtMoney(0), "¥0.00");
+  assert.equal(fmtMoney(10.92, "USD"), "$10.92");
+  assert.equal(fmtMoney(5, "EUR"), "EUR 5.00"); // unknown code -> prefixed
+  assert.equal(fmtMoney(Number.NaN), "—");
+});
+
+test("nextMonthStart lands on the local 1st of the next month", () => {
+  assert.equal(
+    nextMonthStart(new Date(2026, 9, 17, 15, 30).getTime()),
+    new Date(2026, 10, 1).getTime(),
+  );
+  assert.equal(
+    nextMonthStart(new Date(2026, 11, 31, 23, 59).getTime()),
+    new Date(2027, 0, 1).getTime(),
+  );
+  // Exactly on the boundary still points at the following month.
+  assert.equal(nextMonthStart(new Date(2026, 10, 1).getTime()), new Date(2026, 11, 1).getTime());
 });

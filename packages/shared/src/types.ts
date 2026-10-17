@@ -8,11 +8,13 @@ export type TabId = "clock" | "glm" | "vikunja";
 export interface PanelState {
   /** Server build id; the client reloads itself when it changes. */
   build: string;
-  /** Server timestamp stamped right after both fetches resolved. All
+  /** Server timestamp stamped right after all fetches resolved. All
    *  countdowns are pure functions of (resetMs, now) so hydration agrees. */
   now: number;
   glm: GlmState;
   vikunja: VikunjaState;
+  deepseek: DeepSeekState;
+  tavily: TavilyState;
 }
 
 /** Fields every data source reports about its own health. */
@@ -64,7 +66,6 @@ export interface UsageSummary {
 }
 
 export interface GlmState extends Health {
-  level: string;
   fiveHour: QuotaPool | null;
   weekly: QuotaPool | null;
   mcp: McpQuota | null;
@@ -99,4 +100,39 @@ export interface VikunjaState extends Health {
   /** null when no fetch ever succeeded (panel shows the failure card). */
   counts: VikunjaCounts | null;
   buckets: { today: Bucket; soon: Bucket; overdue: Bucket } | null;
+}
+
+export interface DeepSeekBalance {
+  /** The account can still serve API calls (is_available upstream). */
+  available: boolean;
+  /** "CNY" | "USD" as reported; drives the currency symbol. */
+  currency: string;
+  /** Amounts arrive as strings and are parsed once, server-side. Shown as
+   *  reported — granted + toppedUp is not validated against total. */
+  total: number;
+  granted: number;
+  toppedUp: number;
+}
+
+export interface DeepSeekState extends Health {
+  /** null when balance_infos came back empty (card shows its empty state). */
+  balance: DeepSeekBalance | null;
+}
+
+export interface TavilyUsage {
+  /** Account plan name ("Researcher"). */
+  plan: string;
+  /** Account-level monthly pool; null limit = unlimited/unknown (no bar). */
+  used: number;
+  limit: number | null;
+  /** Percentage used, computed server-side like QuotaPool.pct; null when
+   *  limit is null. */
+  pct: number | null;
+  /** Usage billed to this API key (period per Tavily's own reporting). */
+  keyUsed: number | null;
+}
+
+export interface TavilyState extends Health {
+  /** null when the payload had neither account nor key numbers. */
+  usage: TavilyUsage | null;
 }

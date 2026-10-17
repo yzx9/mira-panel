@@ -80,22 +80,34 @@ h1 {
   min-height: 0;
 }
 
+/* No rail padding: a tab (and the active inversion) must weld itself to the
+   chrome — screen edge on the left, divider on the right, navbar rule above —
+   any inset here would read as yet another frame around the column. The
+   inter-tab rules then run the full rail width too. Air for the text lives
+   in .tab's own padding. */
 .rail {
   border-right: 6px solid #000;
-  padding: 20px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  /* gap 0: the tabs carry their own single rule via .tab + .tab — a flex gap
+     plus per-tab borders would draw two parallel lines again. */
+  gap: 0;
   min-height: 0;
 }
+/* No box around a tab: the navbar rule above and the rail divider already
+   frame the column, so a tab border was a second layer. One horizontal rule
+   between tabs is all the separation they need. */
 .tab {
   display: flex;
   flex-direction: column;
   gap: 10px;
   text-decoration: none;
   color: #000;
-  border: 6px solid #000;
-  padding: 22px 24px;
+  padding: 26px 20px;
+}
+.tab + .tab {
+  border-top: 6px solid #000;
 }
 /* Instant inversion marks the selected tab: one bit, no animation. */
 .tab.active {
@@ -122,14 +134,17 @@ h1 {
   line-height: 1.4;
 }
 
-/* Default (clock/vikunja): rows stretch to fill the screen — the extra
-   height stays inside the card blocks instead of leaving a dead band at
-   the bottom. The GLM tab opts out via .spread below. */
+/* Single-line lattice: main paints itself black and the cards are white, so
+   the 6px grid gutters ARE the separators — exactly one line between any two
+   cards, none along the outer edges (cards run flush to the rail divider and
+   the screen edge), and a card that hides (weekly quota) simply removes its
+   lines. Rows stretch to fill the screen; the slack stays inside the cards. */
 main {
-  padding: 16px 12px 14px;
+  padding: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 28px;
+  gap: 6px;
+  background: #000;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
@@ -137,22 +152,15 @@ main {
 main::-webkit-scrollbar {
   display: none;
 }
-/* GLM tab, see App.vue: even inter-row rhythm for the borderless blocks. */
-main.spread {
-  align-items: start;
-  align-content: space-between;
-}
 
-/* Blocks, not boxes: cards carry no border — whitespace (the grid gap) is the
-   only separator, which buys each column ~40px of text width. Only controls
-   (buttons/tabs) and the .bar meter keep outlines; a meter's frame IS its
-   track on a two-colour screen. No overflow:hidden still: a card that does
-   not fit must never silently swallow a row of text — better to see it
+/* White cells on the black lattice. No overflow:hidden still: a card that
+   does not fit must never silently swallow a row of text — better to see it
    spilling than to lose it. No min-height:0 either — that lets a grid row be
    sized by the SHORTER card in the row, which is how the third MCP detail
    row escaped its box. */
 .card {
-  padding: 6px 12px 8px;
+  background: #fff;
+  padding: 16px 20px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -166,14 +174,13 @@ h2 {
   font-weight: 900;
   letter-spacing: 1px;
 }
-/* Solid chip, not a framed one: inverted block is the two-colour way to
-   make a label read as metadata attached to its heading. */
+/* Outline chip: solid inverted chips rendered unevenly on the e-paper, so
+   metadata stays black-on-white with a single thin rule. */
 .tag {
   font-size: 20px;
   font-weight: 400;
-  background: #000;
-  color: #fff;
-  padding: 4px 12px;
+  border: 3px solid #000;
+  padding: 2px 10px;
   vertical-align: middle;
   margin-left: 10px;
 }
@@ -234,6 +241,8 @@ h2 {
 }
 /* The strip card is no longer a flex .card (it is bare above the strip
    blocks), so margin-top:auto would collapse to 0 — pin with a real gap. */
+/* Plain gap (the strip card is content-height, so an auto margin would
+   resolve to 0 anyway). */
 .more {
   font-size: 23px;
   margin-top: 10px;
@@ -307,21 +316,24 @@ button:active {
 /* One wrapper = one main grid cell spanning both columns, so the two rows
    size as intended: the summary strip keeps its content height (auto row),
    the task card takes everything else (1fr). Alone in its row, the wrapper
-   may carry min-height: 0 — the card-level pitfall needs two siblings. */
+   may carry min-height: 0 — the card-level pitfall needs two siblings.
+   Same black-gutter lattice as main, one rule between strip and list. */
 .vk {
   grid-column: span 2;
   display: grid;
   grid-template-rows: auto 1fr;
-  gap: 28px;
+  gap: 6px;
+  background: #000;
   min-height: 0;
 }
 
-/* Summary strip as six equal inverted blocks — the one place a "colour
-   block" replaces what a frame used to delimit. Equal flex widths make the
-   row read as one segmented bar; white-on-black matches the active tab. */
+/* Summary strip: the space split six ways with one vertical rule between
+   cells — white throughout. Solid black blocks were tried here and rendered
+   unevenly on the e-paper, so the strip stays ink-light: flex:1 equal cells,
+   the 6px gap over the black parent shows as the rules. */
 .vk-strip {
   display: flex;
-  gap: 18px;
+  gap: 6px;
 }
 .vk-strip .stat {
   flex: 1;
@@ -329,9 +341,9 @@ button:active {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  background: #000;
-  color: #fff;
-  padding: 16px 8px;
+  background: #fff;
+  color: #000;
+  padding: 14px 8px 16px;
 }
 .vk-strip .stat b {
   font-size: 48px;

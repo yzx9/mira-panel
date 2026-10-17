@@ -5,9 +5,9 @@ defineProps<{ counts: VikunjaCounts; truncated: boolean }>();
 </script>
 
 <template>
-  <!-- No .card wrapper: the strip's inverted blocks ARE the block — a frame
-       around six black rectangles would double the chrome for nothing. -->
-  <section>
+  <!-- .card gives the strip its white cell on main's black lattice and the
+       padding that aligns the stat text with the task table below. -->
+  <section class="card">
     <div class="vk-strip">
       <div class="stat">
         <span>未完成</span><b>{{ counts.open }}</b>

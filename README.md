@@ -43,6 +43,12 @@ devShell 提供 `nodejs_24`（原生 type-stripping 跑 `.ts`，无需编译）�
 | `npm test`                  | shared 包格式化器黄金用例（node:test）                                           |
 | `npm run fmt` / `fmt:check` | oxfmt 全仓格式化 / 校验                                                          |
 
+服务进程管理走 `justfile`：`just status`（监听 + 健康检查）、`just restart`（重启）、
+`just deploy`（构建 + 重启，merge 之后用它）、`just logs`。重启逻辑在
+`scripts/restart-service.sh`：按端口找进程 → kill → 从**主 checkout** setsid 拉起新进程
+→ healthz 验证。脚本会在 git worktree 里直接拒绝执行——从 worktree 起的服务在 worktree
+被删后会变成幽灵进程（2026-10-15 的事故）。
+
 ## 页面结构
 
 ```

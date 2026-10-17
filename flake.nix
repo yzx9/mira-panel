@@ -13,8 +13,9 @@
         in {
           default = pkgs.mkShell {
             # nodejs_24 runs .ts natively (type stripping); chromium is here for
-            # the headless screenshot verification workflow (see README).
-            packages = [ pkgs.nodejs_24 ]
+            # the headless screenshot verification workflow (see README); just
+            # drives the service-control recipes (see justfile).
+            packages = [ pkgs.nodejs_24 pkgs.just ]
               ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.chromium ];
           };
         });

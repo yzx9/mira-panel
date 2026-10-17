@@ -100,9 +100,24 @@ async function token(): Promise<string> {
   return found;
 }
 
-async function api(path: string, key: string): Promise<unknown> {
+/** Write calls the panel makes: POST with a JSON body. Both details are
+ *  load-bearing on Vikunja 2.x v1 — PUT/PATCH answer 405 (that is the
+ *  pre-2.0 verb), and without the Content-Type header the body is silently
+ *  ignored. Verified against this instance; see README. */
+interface ApiInit {
+  method: "POST";
+  json: unknown;
+}
+
+async function api(path: string, key: string, init?: ApiInit): Promise<unknown> {
   const res = await fetch(`${API}${path}`, {
-    headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+    method: init?.method,
+    body: init ? JSON.stringify(init.json) : undefined,
+    headers: {
+      Authorization: `Bearer ${key}`,
+      Accept: "application/json",
+      ...(init ? { "Content-Type": "application/json" } : {}),
+    },
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   const text = await res.text();
@@ -186,10 +201,18 @@ async function fetchAllTasks(key: string): Promise<{ items: VikunjaTask[]; trunc
   const out: VikunjaTask[] = [];
   const filter = encodeURIComponent("done = false");
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await api(
-      `/tasks?filter=${filter}&sort_by=due_date&order_by=asc&per_page=${PAGE_SIZE}&page=${page}`,
-      key,
-    );
+    let res: unknown;
+    try {
+      res = await api(
+        `/tasks?filter=${filter}&sort_by=due_date&order_by=asc&per_page=${PAGE_SIZE}&page=${page}`,
+        key,
+      );
+    } catch (err) {
+      // Some Vikunja builds answer a beyond-last-page read with 404 (others
+      // return []) — for page > 1 that means "no more rows", not a failure.
+      if (page > 1 && err instanceof Error && err.message.startsWith("HTTP 404")) break;
+      throw err;
+    }
     const rows = Array.isArray(res) ? (res as VikunjaTask[]) : [];
     out.push(...rows);
     if (rows.length < PAGE_SIZE) return { items: out, truncated: false };
@@ -238,4 +261,33 @@ export async function getTasks(): Promise<VikunjaData> {
   })();
 
   return inflight;
+}
+
+/** Per-task in-flight completions: a double tap shares one request (and
+ *  re-marking a done task done is idempotent upstream anyway). */
+const marking = new Map<number, Promise<VikunjaData>>();
+
+/** Complete a task upstream, then serve the refreshed state. */
+export async function markDone(id: number): Promise<VikunjaData> {
+  const existing = marking.get(id);
+  if (existing) return existing;
+
+  const run = (async (): Promise<VikunjaData> => {
+    const key = await token();
+    await api(`/tasks/${id}`, key, { method: "POST", json: { done: true } });
+    // Drain any fetch that started before the PUT landed: the module-level
+    // inflight would otherwise be handed back by the refetch below, answering
+    // with the task still open. Anything started after the PUT already sees
+    // done = true upstream.
+    if (inflight) await inflight;
+    cache = { at: 0, data: null };
+    return getTasks();
+  })();
+
+  marking.set(id, run);
+  try {
+    return await run;
+  } finally {
+    marking.delete(id);
+  }
 }

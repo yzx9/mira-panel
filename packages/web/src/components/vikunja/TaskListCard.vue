@@ -6,14 +6,19 @@
 // button at its boundary hides rather than greying out (the two-colour rule
 // has no disabled shade — a lit-but-dead button would be a lie anyway).
 import { computed, ref } from "vue";
-import { LIST_PAGE_ROWS, type VikunjaState } from "@mira-panel/shared";
+import { LIST_PAGE_ROWS, type TaskRow, type VikunjaState } from "@mira-panel/shared";
 
 /** One rendered line: a bucket header or a task row. */
 type Slot =
   | { kind: "header"; key: string; title: string; count: number }
   | { kind: "task"; key: string; task: TaskRow };
 
-const props = defineProps<{ buckets: NonNullable<VikunjaState["buckets"]>; locked: boolean }>();
+const props = defineProps<{
+  buckets: NonNullable<VikunjaState["buckets"]>;
+  locked: boolean;
+  pendingDone: ReadonlySet<number>;
+}>();
+const emit = defineEmits<{ done: [task: TaskRow] }>();
 
 // Most-urgent first — this order decides what page 1 shows.
 const GROUPS = [
@@ -57,15 +62,25 @@ function turn(delta: number): void {
            section so hydration owns the right range (see McpCard). -->
       <tbody>
         <tr v-if="pageSlots.length === 0">
-          <td class="empty" colspan="3">暂无任务</td>
+          <td class="empty" colspan="4">暂无任务</td>
         </tr>
         <template v-for="s in pageSlots" :key="s.key">
           <tr v-if="s.kind === 'header'" class="row-header">
-            <td colspan="3">
+            <td colspan="4">
               {{ s.title }} <span class="tag">{{ s.count }} 项</span>
             </td>
           </tr>
           <tr v-else>
+            <td class="chk">
+              <!-- Empty square = not done (a pre-rendered checkmark would
+                   claim something that has not happened). Solid black while
+                   its request is in flight: "registered". -->
+              <button
+                :disabled="pendingDone.has(s.task.id)"
+                :aria-label="`完成 ${s.task.title}`"
+                @click="emit('done', s.task)"
+              ></button>
+            </td>
             <td class="title">{{ s.task.title }}</td>
             <td class="proj">{{ s.task.project }}</td>
             <td class="num">{{ s.task.when }}</td>

@@ -2,8 +2,8 @@
 // Root component, deliberately a TWO-ROOT fragment: .screen is a grid with
 // rows `116px 1fr` and <header> / .body must be its DIRECT children — a
 // wrapper element here would become the single grid child and break layout.
-import { computed, watch } from "vue";
-import type { PanelState, TabId } from "@mira-panel/shared";
+import { computed, ref, watch } from "vue";
+import type { PanelState, TabId, TaskRow, VikunjaState } from "@mira-panel/shared";
 import Navbar from "./components/Navbar.vue";
 import TabRail from "./components/TabRail.vue";
 import ClockDetail from "./components/clock/ClockDetail.vue";
@@ -54,6 +54,47 @@ function onToggleLock(): void {
   if (locked.value) unlock();
   else lock(); // persists + navigates to the clock page
 }
+
+// Tasks being completed right now: copy-on-write so every mutation swaps the
+// whole ref, and two concurrent completions on different rows never mask
+// each other (a single pending id would — a lit-but-dead checkbox is a lie).
+const pendingDone = ref(new Set<number>());
+
+// Known accepted race: a poll whose server-side fetch started just before the
+// PUT can land after the splice and resurrect the completed row for up to one
+// poll cycle; the next poll self-heals. Chasing it would mean teaching
+// usePanelState about pendingDone — not worth the coupling.
+async function onTaskDone(task: TaskRow): Promise<void> {
+  // Defense in depth: the server already redirects /vikunja to the clock (and
+  // 403s the write route) while locked — this guard covers the gap between
+  // hydration and any navigation race.
+  if (locked.value) return;
+  pendingDone.value = new Set(pendingDone.value).add(task.id);
+  try {
+    const res = await fetch(`/api/vikunja/tasks/${task.id}/done`, {
+      method: "POST",
+      headers: { "X-Panel-Write": "1" },
+    });
+    if (!res.ok) {
+      flash.value =
+        res.status === 403
+          ? "⚠ 面板已锁定"
+          : res.status === 502
+            ? "⚠ Token 无写权限"
+            : "⚠ 完成失败";
+      return;
+    }
+    state.value = { ...state.value, vikunja: (await res.json()) as VikunjaState };
+    const title = task.title.length > 16 ? `${task.title.slice(0, 16)}…` : task.title;
+    flash.value = `✓ 已完成 ${title}`;
+  } catch {
+    flash.value = "⚠ 请求失败";
+  } finally {
+    const next = new Set(pendingDone.value);
+    next.delete(task.id);
+    pendingDone.value = next;
+  }
+}
 </script>
 
 <template>
@@ -83,7 +124,13 @@ function onToggleLock(): void {
         :deepseek="state.deepseek"
         :tavily="state.tavily"
       />
-      <VikunjaDetail v-else :vikunja="state.vikunja" :locked="locked" />
+      <VikunjaDetail
+        v-else
+        :vikunja="state.vikunja"
+        :locked="locked"
+        :pending-done="pendingDone"
+        @done="onTaskDone"
+      />
     </main>
   </div>
 </template>

@@ -372,6 +372,27 @@ tr.row-header td {
   font-weight: 900;
 }
 
+/* Tap-to-complete checkbox column. The button IS the touch target: a 48px
+   square (past the 44px floor), global 5px border, empty = not done. While
+   its request is in flight :disabled paints it solid black — "registered" —
+   which also overrides the UA's grey disabled styling, grey being banned.
+   Fixed column width so the flexible title cell absorbs the change without
+   reflowing proj/when. */
+table.rows td.chk {
+  width: 60px;
+  padding-right: 12px;
+}
+table.rows td.chk button {
+  display: block;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+}
+table.rows td.chk button:disabled {
+  background: #000;
+  color: #fff;
+}
+
 /* ------------------------------------------------------ clock page */
 /* One wide card: the minute hand is the page, the date sits under it in
    small print ("2026年10月15日 星期四"). */

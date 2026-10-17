@@ -96,16 +96,17 @@ README，出现在电子纸上就是噪声。
 
 ### 路由
 
-| 路径                         | 作用                                                                                         |
-| ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `/`、`/clock`、`/index.html` | 时钟页（SSR，首页）                                                                          |
-| `/glm`                       | GLM 面板（SSR）                                                                              |
-| `/vikunja`                   | Vikunja 面板（SSR）                                                                          |
-| `/api/state`                 | 60 秒轮询用的整面板载荷 `{build, now, glm, vikunja, deepseek, tavily}`（vw/vh/dpr 照旧上报） |
-| `/api/usage`                 | `/api/state` 别名（兼容旧链接）                                                              |
-| `/api/raw`                   | 四个数据源的完整原始结果 + 客户端视口（调试用）                                              |
-| `/healthz`                   | `ok`                                                                                         |
-| `/<file>`                    | 静态文件（`packages/server/public/` 与 web 构建产物）                                        |
+| 路径                          | 作用                                                                                                              |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页）                                                                                               |
+| `/glm`                        | GLM 面板（SSR）                                                                                                   |
+| `/vikunja`                    | Vikunja 面板（SSR）                                                                                               |
+| `/api/state`                  | 60 秒轮询用的整面板载荷 `{build, now, glm, vikunja, deepseek, tavily}`（vw/vh/dpr 照旧上报）                      |
+| `/api/usage`                  | `/api/state` 别名（兼容旧链接）                                                                                   |
+| `/api/raw`                    | 四个数据源的完整原始结果 + 客户端视口（调试用）                                                                   |
+| `/api/vikunja/tasks/:id/done` | **唯一的写路径**（POST）：勾选完成一个任务。要求 `X-Panel-Write: 1` 头，锁定态 403，返回刷新后的 vikunja 视图模型 |
+| `/healthz`                    | `ok`                                                                                                              |
+| `/<file>`                     | 静态文件（`packages/server/public/` 与 web 构建产物）                                                             |
 
 ## 数据来源
 
@@ -148,6 +149,13 @@ GET /api/v1/tasks?filter=done = false&sort_by=due_date&order_by=asc&per_page=50&
 - `due_date` 为 `0001-01-01T00:00:00Z` 是 Vikunja 的"没有截止时间"哨兵值
   （`asc` 排序下排最前——这正是当年单次大请求被钳时最先丢的那批）
 - 逾期列表按**最近到期优先**排序
+- **触摸勾选完成**：任务行首的方框 → `POST /api/vikunja/tasks/:id/done` → 服务端
+  `POST /api/v1/tasks/{id}` + JSON body `{"done":true}`。两个坑都有案底（已在本
+  实例验证）：**v1 的更新动词是 POST**（2.x 起 PUT/PATCH 一律 405——社区旧帖里的
+  PUT 是 2.0 之前的事），且**必须带 `Content-Type: application/json`**（表单编码
+  会被静默忽略）；token 是细粒度 scope，**只读 token 写会 403**（面板把它翻译成
+  502 + 「Token 无写权限」提示）。写路径按任务 id 记 in-flight（双击共享一次
+  请求），完成幂等，无 undo——勾错了去 Vikunja 网页撤回
 
 ### DeepSeek 余额（`/glm` 的余额卡）
 
@@ -215,8 +223,9 @@ GET https://api.tavily.com/usage
 navbar 右上的 **锁定** 按钮：点击后跳到时钟页并进入锁定态，原按钮变 **解锁**。
 
 - 锁定态下**只允许看时钟界面**：rail 里 GLM/Vikunja 照常渲染（预览数字可见），但点击
-  **静默无效**（无提示、无 toast）；`刷新数据`/`刷新页面` 同样失效——唯一有效的交互就是
-  解锁按钮
+  **静默无效**（无提示、无 toast）；**直接访问 `/glm`、`/vikunja` 也会被服务端 302 回
+  时钟页**（锁定在 URL 层同样成立）；`刷新数据`/`刷新页面` 同样失效——唯一有效的交互
+  就是解锁按钮
 - 数据轮询 60 秒 → **10 分钟**；时钟本身照常每分钟走动（纯客户端，不取数）
 - 锁定状态存在 **cookie**（`mira-panel-lock=1`），整页重载 / 部署自重载后仍然保持；
   cookie 对 SSR 可读，所以锁定后跳转的时钟页**第一帧就是锁定态**（只闪一次，不会先换
@@ -281,10 +290,16 @@ chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 
 验收要点：截图与旧版逐字节一致（同等数据下）；浏览器控制台零水合告警；
 `curl -s /glm | grep 亿` 无 JS 也能读到真实数字；`curl -I` 200 无 body、
-`curl -X POST` 405。
+`curl -X POST` 405（**唯一例外**：`POST /api/vikunja/tasks/:id/done` 带
+`X-Panel-Write: 1` 时 200，缺头 400，锁定态 403——勾选写路径的验收就用
+一个牺牲任务走这三个分支）。
 
 ## 安全
 
+- **面板无鉴权，且现在有一条写路径**：局域网内任何设备都能通过
+  `/api/vikunja/tasks/:id/done` 勾掉任务——与锁定模式的君子协定同信任层级（家用
+  可接受）。`X-Panel-Write: 1` 自定义头迫使跨站写入先走 CORS 预检，而本服务永不
+  应答预检，跨站表单/fetch 因此写不进来；锁定 cookie 在服务端也被同一条路径拒绝
 - 四把密钥都**只在服务端内存**中使用：不落盘、不进代码/仓库（GLM 走 `execFile(helper)`
   的 stdout；Vikunja/DeepSeek/Tavily 走 env 与 agenix 运行时文件的候选链 + Bearer 头）、
   不写日志、不进 `/api/raw`（raw 只含上游响应原文，均为数字）
@@ -298,7 +313,8 @@ chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 - [x] npm workspaces monorepo + 全仓 TS + Hono + Vue 3.6 Vapor 重构
 - [ ] 持久化：**已决定先保持现状**（Hermes 后台拉起的进程；gateway 重启后需手动重启）
 - [ ] 还能接哪些数据源（Readeck / FreshRSS / HN）
-- [ ] Vikunja 是否支持触摸勾选完成（需要写接口 + 防重复提交）
+- [x] Vikunja 触摸勾选完成（`POST /api/vikunja/tasks/:id/done` + 三层防重复提交，
+      2026-10 已落地）
 - [ ] 是否把 Pi 的字体改动（`noto-fonts-cjk-sans`）固化进 nix-config 仓库
 - [ ] GLM 错误消息里的上游响应体做一次 key 脱敏（一行加固，待确认）
 - [ ] Vue 3.6 稳定发布后：升级 RC → stable，评估 `createVaporApp` 根（甩掉 VDOM

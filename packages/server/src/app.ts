@@ -11,9 +11,9 @@ import type { PanelState, TabId } from "@mira-panel/shared";
 import { getDeepSeekBalance } from "./data/deepseek.ts";
 import { getTavilyUsage } from "./data/tavily.ts";
 import { getUsage } from "./data/usage.ts";
-import { getTasks } from "./data/vikunja.ts";
+import { getTasks, markDone } from "./data/vikunja.ts";
 import { serveStatic, type StaticResult } from "./staticFiles.ts";
-import { stateFor } from "./state.ts";
+import { stateFor, vikunjaState } from "./state.ts";
 import { noteClientViewport } from "./viewport.ts";
 
 export type RenderPage = (tab: TabId, state: PanelState, locked: boolean) => Promise<string>;
@@ -51,7 +51,27 @@ export function createApp(deps: AppDeps): Hono {
     c.header("X-Content-Type-Options", "nosniff");
   });
 
-  // Old server answered GET/HEAD only.
+  // The single deliberate write path, registered BEFORE the method guard
+  // below: Hono composes matching handlers in registration order and a route
+  // handler that answers is terminal, so this POST never reaches the guard.
+  // The X-Panel-Write header forces a CORS preflight for cross-site writers
+  // — a preflight this server never answers, which is the CSRF story.
+  app.post("/api/vikunja/tasks/:id/done", async (c) => {
+    if (lockCookie(c.req.header("Cookie"))) return c.text("Panel is locked", 403);
+    if (c.req.header("X-Panel-Write") !== "1") return c.text("Missing X-Panel-Write header", 400);
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id) || id <= 0) return c.text("Bad task id", 400);
+    try {
+      return c.json(vikunjaState(await markDone(id)));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith("HTTP 403"))
+        return c.text("Vikunja rejected the write — token is likely read-only", 502);
+      throw err; // -> onError -> 500 (the client flashes a generic failure)
+    }
+  });
+
+  // Old server answered GET/HEAD only — except the write route above.
   app.use("*", async (c, next) => {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") {
       return c.text("Method Not Allowed", 405);
@@ -72,6 +92,9 @@ export function createApp(deps: AppDeps): Hono {
   const page = (tab: TabId) => async (c: Context) => {
     if (!deps.renderPage) return c.text("web package not built — run `npm run build` first", 503);
     const locked = lockCookie(c.req.header("Cookie"));
+    // A locked panel only ever shows the clock: the data tabs redirect there,
+    // so the lock holds at the URL level too, not just the rail's click guard.
+    if (locked && tab !== "clock") return c.redirect("/");
     return c.html(await deps.renderPage(tab, await stateFor(deps.build), locked));
   };
   const clockPage = page("clock");

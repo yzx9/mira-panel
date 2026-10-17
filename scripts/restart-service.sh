@@ -8,8 +8,21 @@
 # 2026-10-15 ghost-process incident. Run from the main checkout, usually
 # via `just restart` / `just deploy`.
 #
+# --force (or FORCE=1) overrides the worktree refusal for preview deploys:
+# serve an unmerged branch from its worktree to eyeball it on the kiosk.
+# Stop that server before deleting the worktree, or it turns into the ghost
+# above — after merging, `just deploy` from the main checkout replaces it.
+#
 # Env overrides: PORT (default 15932).
 set -euo pipefail
+
+FORCE="${FORCE:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE=1 ;;
+    *) echo "restart-service: unknown option: $arg (only --force)" >&2; exit 2 ;;
+  esac
+done
 
 PORT="${PORT:-15932}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,9 +31,14 @@ LOG_FILE="$LOG_DIR/server.log"
 
 # A worktree's .git is a file pointing into the main repo's .git/worktrees/.
 if [ -f "$ROOT/.git" ]; then
-  echo "restart-service: refusing to run from a git worktree ($ROOT)" >&2
-  echo "restart-service: the production server must start from the main checkout" >&2
-  exit 1
+  if [ "$FORCE" != "1" ]; then
+    echo "restart-service: refusing to run from a git worktree ($ROOT)" >&2
+    echo "restart-service: the production server must start from the main checkout" >&2
+    echo "restart-service: pass --force (or FORCE=1) for a preview deploy anyway" >&2
+    exit 1
+  fi
+  echo "restart-service: WARNING: preview deploy from a git worktree ($ROOT)" >&2
+  echo "restart-service: stop this server before deleting the worktree — it would ghost" >&2
 fi
 
 listening() { ss -tln 2>/dev/null | grep -qE ":$PORT "; }

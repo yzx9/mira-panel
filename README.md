@@ -47,7 +47,9 @@ devShell 提供 `nodejs_24`（原生 type-stripping 跑 `.ts`，无需编译）�
 `just deploy`（构建 + 重启，merge 之后用它）、`just logs`。重启逻辑在
 `scripts/restart-service.sh`：按端口找进程 → kill → 从**主 checkout** setsid 拉起新进程
 → healthz 验证。脚本会在 git worktree 里直接拒绝执行——从 worktree 起的服务在 worktree
-被删后会变成幽灵进程（2026-10-15 的事故）。
+被删后会变成幽灵进程（2026-10-15 的事故）；要看未合并分支的效果用**预览部署**：
+`just restart force`（等价于 `restart-service.sh --force` / `FORCE=1`），合并后记得从
+主 checkout `just deploy` 替换掉它。
 
 ## 页面结构
 

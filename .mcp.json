@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "nix",
+      "args": ["run", ".#playwright-mcp", "--", "--headless", "--isolated"],
+      "env": {}
+    }
+  }
+}

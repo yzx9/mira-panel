@@ -24,3 +24,17 @@ export const RECONNECT_MAX_MS = 30_000;
 // 14px row padding (mis-taps on adjacent rows were real at a tighter
 // rhythm); paging is client-side over the full bucket lists.
 export const LIST_PAGE_ROWS = 14;
+
+// Lock lease: unlocking issues a lease for this long, from the moment of
+// unlock (it does not extend with activity; re-unlocking re-issues). When
+// every lease has expired the panel re-locks itself and broadcasts the
+// transition. Leases live in server memory + a runtime-dir file only.
+export const LOCK_LEASE_MS = 30 * 60_000;
+
+// PIN throttle: a wrong PIN is answered after min(base * 2^(n-1), max)
+// where n is the consecutive-failure count; success — or this long without
+// an attempt — clears the ladder. With a 10^4 keyspace this ladder, not the
+// comparison, is the real brute-force defence (see README's lock section).
+export const PIN_BACKOFF_BASE_MS = 400;
+export const PIN_BACKOFF_MAX_MS = 10 * 60_000;
+export const PIN_BACKOFF_RESET_MS = 15 * 60_000;

@@ -11,6 +11,7 @@ import { createServer as createViteServer } from "vite";
 import { createApp, type RenderPage } from "./app.ts";
 import { computeBuildId } from "./buildId.ts";
 import { createPanelHub } from "./hub.ts";
+import { createLock, defaultLeasesFile } from "./lock.ts";
 import { assemble, assertMarkers, tabTitle } from "./template.ts";
 import { lastViewport } from "./viewport.ts";
 import { wirePanelSocket } from "./ws.ts";
@@ -40,21 +41,26 @@ const vite = await createViteServer({
   server: { middlewareMode: true, hmr: { server: httpServer } },
 });
 
-const hub = createPanelHub(build);
+// The lock is shared by the app (routes, SSR) and the hub (cadence,
+// transition broadcast) — one instance, one source of truth. Same runtime
+// file as prod, so dev restarts keep the unlock too.
+const lock = await createLock({ file: defaultLeasesFile() });
+const hub = createPanelHub(build, lock);
 const app = createApp({
   build,
   hub,
+  lock,
   staticRoots: [join(import.meta.dirname, "../public")],
   clientInfo: lastViewport,
-  renderPage: async (tab, state, locked) => {
+  renderPage: async (tab, state, locked, pinConfigured) => {
     // ssrLoadModule runs the web sources through vite (aliases + vapor SFC
     // compile included) and caches with HMR-aware invalidation.
     const { render } = (await vite.ssrLoadModule("/src/entry-server.ts")) as { render: RenderPage };
-    const appHtml = await render(tab, state, locked);
+    const appHtml = await render(tab, state, locked, pinConfigured);
     const html = assemble(shell, {
       title: tabTitle(tab),
       appHtml,
-      bootstrap: { tab, state, locked },
+      bootstrap: { tab, state, locked, pinConfigured },
     });
     // Lets vite rewrite /src/* imports and inject its HMR client.
     return vite.transformIndexHtml(tab === "vikunja" ? "/vikunja" : "/glm", html);

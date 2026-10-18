@@ -11,15 +11,24 @@ import type { PanelState, TabId, VikunjaState } from "@mira-panel/shared";
 
 import { markTaskDone } from "./data/vikunja.ts";
 import type { Hub } from "./hub.ts";
+import type { LockModule } from "./lock.ts";
 import { serveStatic, type StaticResult } from "./staticFiles.ts";
 import { stateFor, vikunjaState } from "./state.ts";
 import type { ClientViewport } from "./viewport.ts";
 
-export type RenderPage = (tab: TabId, state: PanelState, locked: boolean) => Promise<string>;
+export type RenderPage = (
+  tab: TabId,
+  state: PanelState,
+  locked: boolean,
+  pinConfigured: boolean,
+) => Promise<string>;
 
 export interface AppDeps {
   build: string;
   hub: Hub;
+  /** Server-authoritative lock: the single seam pages, the write route and
+   *  the hub cadence all read. */
+  lock: LockModule;
   /** Undefined when the web bundle is missing -> pages answer 503. */
   renderPage?: RenderPage;
   /** Searched in order for the static fallback. */
@@ -61,7 +70,7 @@ export function createApp(deps: AppDeps): Hono {
   // The X-Panel-Write header forces a CORS preflight for cross-site writers
   // — a preflight this server never answers, which is the CSRF story.
   app.post("/api/vikunja/tasks/:id/done", async (c) => {
-    if (lockCookie(c.req.header("Cookie"))) return c.text("Panel is locked", 403);
+    if (deps.lock.isLocked()) return c.text("Panel is locked", 403);
     if (c.req.header("X-Panel-Write") !== "1") return c.text("Missing X-Panel-Write header", 400);
     const id = Number(c.req.param("id"));
     if (!Number.isInteger(id) || id <= 0) return c.text("Bad task id", 400);
@@ -86,7 +95,35 @@ export function createApp(deps: AppDeps): Hono {
     }
   });
 
-  // Old server answered GET/HEAD only — except the write route above.
+  // Lock transitions, same registration position and CSRF story as the write
+  // route above. lockAll is idempotent; unlockWithPin owns the failure
+  // ladder, so bursts are throttled here rather than at the route.
+  app.post("/api/lock", async (c) => {
+    if (c.req.header("X-Panel-Write") !== "1") return c.text("Missing X-Panel-Write header", 400);
+    await deps.lock.lockAll();
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/unlock", async (c) => {
+    if (c.req.header("X-Panel-Write") !== "1") return c.text("Missing X-Panel-Write header", 400);
+    let pin: unknown;
+    try {
+      pin = (await c.req.json()).pin;
+    } catch {
+      return c.text("Bad JSON body", 400);
+    }
+    if (typeof pin !== "string") return c.text("Bad pin", 400);
+    const result = await deps.lock.unlockWithPin(pin);
+    if (result.ok) return c.json({ ok: true });
+    // 503 = no PIN configured (locking was refused client-side; this is the
+    // belt to that braces) — 403 = wrong PIN, already ladder-delayed.
+    return c.text(
+      result.configured ? "Wrong PIN" : "PIN not configured",
+      result.configured ? 403 : 503,
+    );
+  });
+
+  // Old server answered GET/HEAD only — except the POST routes above.
   app.use("*", async (c, next) => {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") {
       return c.text("Method Not Allowed", 405);
@@ -96,22 +133,23 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get("/healthz", (c) => c.text("ok\n"));
 
-  // The lock lives in a cookie so SSR renders the locked navbar from the
-  // first paint — a locked panel never repaints its buttons after hydration.
-  function lockCookie(header: string | undefined): boolean {
-    return (header ?? "").split(";").some((p) => p.trim() === "mira-panel-lock=1");
-  }
-
   // One tab = one URL = one SSR pass. No client-side routing, so a tab switch
   // is a normal navigation the e-paper repaints anyway. The bootstrap is
   // tab-aware: stateFor embeds exactly the slices the tab's WS topics carry.
   const page = (tab: TabId) => async (c: Context) => {
     if (!deps.renderPage) return c.text("web package not built — run `npm run build` first", 503);
-    const locked = lockCookie(c.req.header("Cookie"));
+    const locked = deps.lock.isLocked();
     // A locked panel only ever shows the clock: the data tabs redirect there,
     // so the lock holds at the URL level too, not just the rail's click guard.
     if (locked && tab !== "clock") return c.redirect("/");
-    return c.html(await deps.renderPage(tab, await stateFor(deps.hub, tab, deps.build), locked));
+    return c.html(
+      await deps.renderPage(
+        tab,
+        await stateFor(deps.hub, tab, deps.build),
+        locked,
+        deps.lock.pinConfigured(),
+      ),
+    );
   };
   const clockPage = page("clock");
   app.get("/", clockPage);

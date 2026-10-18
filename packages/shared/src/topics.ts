@@ -76,22 +76,16 @@ export interface TopicPayloadMap {
 export interface SubscribeMsg {
   type: "subscribe";
   tab: TabId;
-  locked: boolean;
   vw?: number;
   vh?: number;
   dpr?: number;
-}
-
-export interface LockMsg {
-  type: "lock";
-  locked: boolean;
 }
 
 export interface RefreshMsg {
   type: "refresh";
 }
 
-export type ClientMsg = SubscribeMsg | LockMsg | RefreshMsg;
+export type ClientMsg = SubscribeMsg | RefreshMsg;
 
 export interface HelloMsg {
   type: "hello";
@@ -99,6 +93,9 @@ export interface HelloMsg {
    *  old 60s poll carried. */
   build: string;
   now: number;
+  /** Server-authoritative lock at hello time — a reconnecting page adopts
+   *  it, so transitions that happened while it was offline self-correct. */
+  locked: boolean;
 }
 
 export interface UpdateMsg<T extends TopicId = TopicId> {
@@ -115,10 +112,19 @@ export interface AckMsg {
   type: "ack";
 }
 
+/** Edge-triggered lock transition, zero payload beyond the flag: unlock
+ *  events never wait for data — pages render from cached snapshots and
+ *  fresh numbers arrive as ordinary update messages. */
+export interface LockedMsg {
+  type: "locked";
+  locked: boolean;
+  now: number;
+}
+
 /** App-level keepalive: browsers answer WS ping frames without waking JS,
  *  so the server speaks JSON pings the page can actually see. */
 export interface PingMsg {
   type: "ping";
 }
 
-export type ServerMsg = HelloMsg | UpdateMsg | AckMsg | PingMsg;
+export type ServerMsg = HelloMsg | UpdateMsg | AckMsg | LockedMsg | PingMsg;

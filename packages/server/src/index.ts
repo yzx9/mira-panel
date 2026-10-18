@@ -10,6 +10,7 @@ import { serve } from "@hono/node-server";
 import { createApp, type RenderPage } from "./app.ts";
 import { computeBuildId } from "./buildId.ts";
 import { createPanelHub } from "./hub.ts";
+import { createLock, defaultLeasesFile } from "./lock.ts";
 import { assemble, assertMarkers, tabTitle } from "./template.ts";
 import { lastViewport } from "./viewport.ts";
 import { wirePanelSocket } from "./ws.ts";
@@ -37,11 +38,11 @@ try {
   assertMarkers(shell);
   const ssrUrl = pathToFileURL(SSR_PATH).href;
   const { render } = (await import(ssrUrl)) as { render: RenderPage };
-  renderPage = async (tab, state, locked) =>
+  renderPage = async (tab, state, locked, pinConfigured) =>
     assemble(shell, {
       title: tabTitle(tab),
-      appHtml: await render(tab, state, locked),
-      bootstrap: { tab, state, locked },
+      appHtml: await render(tab, state, locked, pinConfigured),
+      bootstrap: { tab, state, locked, pinConfigured },
     });
   staticRoots.push(WEB_CLIENT_DIR);
   process.stdout.write(`[mira-panel] web bundle loaded (build ${build})\n`);
@@ -51,8 +52,11 @@ try {
   );
 }
 
-const hub = createPanelHub(build);
-const app = createApp({ build, hub, renderPage, staticRoots, clientInfo: lastViewport });
+// The lock is shared by the app (routes, SSR) and the hub (cadence,
+// transition broadcast) — one instance, one source of truth.
+const lock = await createLock({ file: defaultLeasesFile() });
+const hub = createPanelHub(build, lock);
+const app = createApp({ build, hub, lock, renderPage, staticRoots, clientInfo: lastViewport });
 
 const server = serve({ fetch: app.fetch, port: PORT, hostname: HOST }, () => {
   process.stdout.write(`[mira-panel] panel on http://${HOST}:${PORT}/ (build ${build})\n`);

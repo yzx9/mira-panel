@@ -456,3 +456,62 @@ table.rows td.chk button:disabled {
   font-size: 46px;
   font-weight: 400;
 }
+
+/* --------------------------------------------------------- pin pad */
+/* Full-canvas overlay above the (locked) clock page. Paper-white backdrop,
+   not a dim: e-paper has no honest translucency, so cover. Keys reuse the
+   global button language at touch scale; the submit key follows the pager
+   rule — hide (keep the slot) until it can act, because e-paper has no
+   honest disabled shade and a lit dead button is a lie. */
+.pinpad {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  background: #fff;
+}
+.pinpad-card {
+  border: 5px solid #000;
+  padding: 52px 64px 40px;
+  display: grid;
+  justify-items: center;
+  gap: 28px;
+}
+.pinpad-title {
+  font-size: 40px;
+}
+.pinpad-dots {
+  font-size: 64px;
+  letter-spacing: 22px;
+  min-height: 78px;
+}
+.pinpad-keys {
+  display: grid;
+  grid-template-columns: repeat(3, 220px);
+  gap: 20px;
+}
+.pinpad-keys button {
+  width: 220px;
+  height: 150px;
+  font-size: 64px;
+  padding: 0;
+}
+.pinpad-keys button.pinpad-fn {
+  font-size: 36px;
+}
+.pinpad-keys button.pinpad-ok {
+  visibility: hidden;
+}
+.pinpad-keys button.pinpad-ok.pinpad-go {
+  visibility: visible;
+  background: #000;
+  color: #fff;
+}
+.pinpad-keys button.pinpad-ok.pinpad-go:active {
+  background: #fff;
+  color: #000;
+}
+.pinpad-cancel {
+  margin-top: 8px;
+}

@@ -16,8 +16,7 @@
 //   - no timers beyond the transport: countdowns advance when updates carry
 //     a fresher `now` (pings deliberately do not)
 
-import { onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
-import type { Ref } from "vue";
+import { onMounted, onScopeDispose, ref, shallowRef } from "vue";
 import {
   RECONNECT_MAX_MS,
   RECONNECT_MIN_MS,
@@ -89,7 +88,7 @@ function applyUpdate(s: PanelState, msg: UpdateMsg): PanelState {
   }
 }
 
-export function usePanelState(initial: PanelState, tab: TabId, locked?: Ref<boolean>) {
+export function usePanelState(initial: PanelState, tab: TabId, onLocked?: (v: boolean) => void) {
   const state = shallowRef<PanelState>(initial);
   // Transient navbar acknowledgement ("已刷新 …" / "⚠ 连接断开"). Null on the
   // server and on the first client render, so hydration always agrees.
@@ -127,6 +126,8 @@ export function usePanelState(initial: PanelState, tab: TabId, locked?: Ref<bool
           location.reload();
           return;
         }
+        // Level sync: transitions missed while offline self-correct here.
+        onLocked?.(msg.locked);
         break;
       case "update":
         state.value = applyUpdate(state.value, msg);
@@ -137,6 +138,12 @@ export function usePanelState(initial: PanelState, tab: TabId, locked?: Ref<bool
           if (!activeStale(state.value))
             flash.value = "已刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
         }
+        break;
+      case "locked":
+        // Edge-triggered remote transition (another client, or the lease
+        // expiring) — the caller routes it into the same reactive flag the
+        // local buttons use, so every side effect lives in one watch.
+        onLocked?.(msg.locked);
         break;
       case "ping":
         break; // keepalive only — receiving it already fed the watchdog
@@ -163,7 +170,6 @@ export function usePanelState(initial: PanelState, tab: TabId, locked?: Ref<bool
       send({
         type: "subscribe",
         tab,
-        locked: locked?.value ?? false,
         vw: window.innerWidth,
         vh: window.innerHeight,
         dpr: window.devicePixelRatio || 1,
@@ -213,14 +219,10 @@ export function usePanelState(initial: PanelState, tab: TabId, locked?: Ref<bool
     window.addEventListener("online", onOnline);
   });
 
-  // The cadence follows the lock: locked connections tell the hub, which
-  // stretches every source to its locked interval. Unlocking should feel
-  // immediate — a forced round pulls fresh data right away.
-  if (locked)
-    watch(locked, (v) => {
-      send({ type: "lock", locked: v });
-      if (!v) refresh(true);
-    });
+  // Unlock cadence is server-side now: the hub stretches every source the
+  // moment the global lock flips (it subscribes to the lock module), so the
+  // client neither declares nor polls the lock — it only RECEIVES the
+  // hello/locked messages above.
 
   onScopeDispose(() => {
     disposed = true;

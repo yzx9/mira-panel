@@ -1,34 +1,71 @@
-// Lock mode, honour-system edition: locking persists a cookie and navigates
-// to the clock page; unlocking clears it and lets the buttons come back.
-//
-// The lock lives in a COOKIE rather than localStorage on purpose: the server
-// reads it during SSR, so the page after 锁定 is rendered locked from the
-// very first paint. Reactive-swap-then-navigate would repaint the navbar
-// twice on an e-paper (button swap + full page); cookie-first keeps it at
-// exactly one flash. It is also the seam a future companion-app integration
-// replaces — the server can read (and later enforce) the same signal.
+// Lock = a server-side lease (packages/server/src/lock.ts). The client holds
+// NO state of its own — no cookie, no token, nothing to clear or steal: it
+// asks the server, the server decides. lock() remembers the current tab for
+// the return trip; unlock(pin) is verified server-side (a 4-digit PIN with a
+// failure ladder — see shared constants) and only flips the reactive flag on
+// a 200. Transitions may also arrive over the WS socket (remote lock, lease
+// expiry): usePanelState feeds those into the same ref, and App's watch owns
+// every side effect in one place.
+
 import { ref } from "vue";
 
-const COOKIE_NAME = "mira-panel-lock";
+const RETURN_TAB_KEY = "mira-panel-return-tab";
+
+export type UnlockOutcome = "ok" | "wrong" | "unconfigured" | "offline";
 
 export function useLock(initial: boolean) {
-  // Initial value comes from the server (SSR read the cookie) and is embedded
-  // in the bootstrap JSON, so hydration agrees with the first paint.
   const locked = ref(initial);
 
-  function lock(): void {
-    // Cookie first (synchronous), then the one navigation locking does. No
-    // reactive repaint happens that matters — the page is replaced wholesale.
-    document.cookie = `${COOKIE_NAME}=1; path=/; max-age=31536000; samesite=lax`;
+  /** A data tab is worth remembering; the clock page is where lock lands. */
+  function rememberTab(): void {
+    try {
+      const path = location.pathname;
+      if (path !== "/" && path !== "/clock" && path !== "/index.html")
+        localStorage.setItem(RETURN_TAB_KEY, path);
+    } catch {
+      // private mode &c. — staying on the clock page after unlock is fine
+    }
+  }
+
+  /** One-shot: read and clear the remembered tab (null = none/clock). */
+  function consumeTab(): string | null {
+    try {
+      const path = localStorage.getItem(RETURN_TAB_KEY);
+      localStorage.removeItem(RETURN_TAB_KEY);
+      return path;
+    } catch {
+      return null;
+    }
+  }
+
+  async function lock(): Promise<void> {
+    try {
+      await fetch("/api/lock", { method: "POST", headers: { "X-Panel-Write": "1" } });
+    } catch {
+      // A failed lock POST still navigates below — the server may simply be
+      // restarting; the locked clock page is the safe place to land.
+    }
+    // App's watch owns the navigation; setting the flag fires it once.
     locked.value = true;
-    location.assign("/");
   }
 
-  function unlock(): void {
-    document.cookie = `${COOKIE_NAME}=; path=/; max-age=0; samesite=lax`;
-    // Intentional repaint: the refresh buttons return as feedback.
-    locked.value = false;
+  async function unlock(pin: string): Promise<UnlockOutcome> {
+    let res: Response;
+    try {
+      res = await fetch("/api/unlock", {
+        method: "POST",
+        headers: { "X-Panel-Write": "1", "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
+      });
+    } catch {
+      return "offline";
+    }
+    if (res.ok) {
+      locked.value = false; // App's watch: refresh (+ return-trip navigation)
+      return "ok";
+    }
+    return res.status === 503 ? "unconfigured" : "wrong";
   }
 
-  return { locked, lock, unlock };
+  return { locked, lock, unlock, rememberTab, consumeTab };
 }

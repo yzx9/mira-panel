@@ -58,10 +58,28 @@ async function waitFor(cond: () => boolean, ms = 1000, what = "condition"): Prom
   }
 }
 
-function subscribe(conn: FakeConn, hub: ReturnType<typeof createHub>, tab: string, locked = false) {
+function subscribe(conn: FakeConn, hub: ReturnType<typeof createHub>, tab: string) {
   const handle = hub.attach(conn.send);
-  handle.message(JSON.stringify({ type: "subscribe", tab, locked }));
+  handle.message(JSON.stringify({ type: "subscribe", tab }));
   return handle;
+}
+
+/** A controllable LockView: set() flips the state and fires the listeners,
+ *  exactly like the real lease module's transitions. */
+function fakeLock(initial = false) {
+  let locked = initial;
+  const cbs = new Set<(v: boolean) => void>();
+  return {
+    isLocked: () => locked,
+    onChange(cb: (v: boolean) => void) {
+      cbs.add(cb);
+      return () => cbs.delete(cb);
+    },
+    set(v: boolean) {
+      locked = v;
+      for (const cb of cbs) cb(v);
+    },
+  };
 }
 
 const updatesOf = (conn: FakeConn) =>
@@ -299,24 +317,75 @@ test("a first-ever failure still reaches subscribers, flagged stale — not sile
   handle.close();
 });
 
-test("refresh answers ack once the forced round settles; lock stretches the cadence", async () => {
+test("a global lock transition broadcasts to everyone and stretches the cadence", async () => {
   const counter: Counter = { fetches: 0 };
-  const hub = createHub("b1", defs(counter, {}, 15, 5000));
-  const conn = fakeConn();
-  const handle = hub.attach(conn.send);
+  const lock = fakeLock(false);
+  const hub = createHub("b1", defs(counter, {}, 15, 5000), lock);
+  const connA = fakeConn();
+  const connB = fakeConn();
+  const handleA = subscribe(connA, hub, "clock");
+  const handleB = subscribe(connB, hub, "clock");
 
-  // Subscribe unlocked, then go locked: the cadence must collapse to the
-  // locked interval (effectively quiet within this test's window).
-  handle.message(JSON.stringify({ type: "subscribe", tab: "clock", locked: false }));
+  // Unlocked cadence runs; hello reflects the unlocked state.
   await waitFor(() => counter.fetches >= 2, 1000, "unlocked ticks");
-  handle.message(JSON.stringify({ type: "lock", locked: true }));
+  const hello = connA.sent.find((m) => m.type === "hello");
+  assert.ok(hello && hello.type === "hello" && hello.locked === false);
+
+  // The server-side lock flips: both connections hear the edge, and the
+  // cadence collapses to the locked interval within this test's window.
+  lock.set(true);
+  for (const c of [connA, connB]) {
+    const msg = c.sent.find((m) => m.type === "locked");
+    assert.deepEqual(msg && msg.type === "locked" ? [msg.locked] : null, [true]);
+  }
   const at = counter.fetches;
   await sleep(80);
   assert.equal(counter.fetches, at); // 5s locked interval -> nothing fired
 
-  // A manual refresh forces a round even while locked, then acks.
-  handle.message(JSON.stringify({ type: "refresh" }));
-  await waitFor(() => conn.sent.some((m) => m.type === "ack"), 1000, "ack");
+  // A manual refresh past the floor still forces a round, then acks.
+  handleA.message(JSON.stringify({ type: "refresh" }));
+  await waitFor(() => connA.sent.some((m) => m.type === "ack"), 1000, "ack");
   assert.ok(counter.fetches > at);
+  handleA.close();
+  handleB.close();
+});
+
+test("hello carries the locked level so a reconnecting page self-corrects", async () => {
+  const counter: Counter = { fetches: 0 };
+  const lock = fakeLock(true);
+  const hub = createHub("b1", defs(counter), lock);
+  const conn = fakeConn();
+  const handle = subscribe(conn, hub, "clock");
+  const hello = conn.sent.find((m) => m.type === "hello");
+  assert.ok(hello && hello.type === "hello" && hello.locked === true);
+  handle.close();
+});
+
+test("an upstream floor absorbs refresh bursts without re-fetching", async () => {
+  const counter: Counter = { fetches: 0 };
+  // interval 15ms but a 300ms upstream floor on both declared sources:
+  // bursts inside the floor must serve cache, the one after it may fetch.
+  const made = defs(counter, {}, 15);
+  made["glm-quota"].floorMs = 300;
+  made.vikunja.floorMs = 300;
+  const hub = createHub("b1", made);
+  const conn = fakeConn();
+  const handle = subscribe(conn, hub, "vikunja");
+
+  await waitFor(() => counter.fetches >= 1, 1000, "first fetch");
+  const at = counter.fetches;
+
+  // Three refreshes back-to-back: all ack, none re-fetch.
+  for (let i = 0; i < 3; i++) {
+    handle.message(JSON.stringify({ type: "refresh" }));
+    await waitFor(() => conn.sent.filter((m) => m.type === "ack").length === i + 1, 1000, "ack");
+  }
+  await sleep(30);
+  assert.equal(counter.fetches, at);
+
+  // Past the floor a refresh fetches again.
+  await sleep(300);
+  handle.message(JSON.stringify({ type: "refresh" }));
+  await waitFor(() => counter.fetches > at, 2000, "post-floor fetch");
   handle.close();
 });

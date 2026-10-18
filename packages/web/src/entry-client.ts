@@ -13,8 +13,10 @@ import App from "./App.vue";
 interface Bootstrap {
   tab: TabId;
   state: PanelState;
-  /** Server read the lock cookie during SSR; hydration starts from it. */
+  /** Server-authoritative lock at SSR time; hydration starts from it. */
   locked: boolean;
+  /** A PIN is configured; locking is refused client-side without one. */
+  pinConfigured: boolean;
 }
 
 const raw = document.getElementById("panel-state")?.textContent ?? "";
@@ -27,6 +29,7 @@ createSSRApp(App, {
   tab: bootstrap.tab,
   initial: bootstrap.state,
   locked: bootstrap.locked,
+  pinConfigured: bootstrap.pinConfigured,
 })
   .use(vaporInteropPlugin)
   .mount("#app");

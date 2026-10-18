@@ -5,6 +5,7 @@
 import { computed, ref, watch } from "vue";
 import type { PanelState, TabId, TaskRow, VikunjaState } from "@mira-panel/shared";
 import Navbar from "./components/Navbar.vue";
+import PinPad from "./components/PinPad.vue";
 import TabRail from "./components/TabRail.vue";
 import ClockDetail from "./components/clock/ClockDetail.vue";
 import GlmDetail from "./components/glm/GlmDetail.vue";
@@ -13,11 +14,21 @@ import { useClock } from "./composables/useClock";
 import { useLock } from "./composables/useLock";
 import { usePanelState } from "./composables/usePanelState";
 
-const props = defineProps<{ tab: TabId; initial: PanelState; locked: boolean }>();
+const props = defineProps<{
+  tab: TabId;
+  initial: PanelState;
+  locked: boolean;
+  /** SSR flag: locking is refused (flash, not lock) without a configured PIN. */
+  pinConfigured: boolean;
+}>();
 
 const { clockNow } = useClock(props.initial.now);
-const { locked, lock, unlock } = useLock(props.locked);
-const { state, flash, refresh } = usePanelState(props.initial, props.tab, locked);
+const { locked, lock, unlock, rememberTab, consumeTab } = useLock(props.locked);
+// Remote transitions (another client, lease expiry, reconnect hello) land in
+// the same reactive flag the local buttons flip — one watch owns the effects.
+const { state, flash, refresh } = usePanelState(props.initial, props.tab, (v) => {
+  locked.value = v;
+});
 
 // Header freshness stamp: the active tab's fetch time; the clock tab speaks
 // for both sources, so it shows whichever fetched later ("—" = never).
@@ -32,14 +43,23 @@ const fetchedAt = computed(() => {
   return props.tab === "vikunja" ? vk : glm;
 });
 
-// Unlocking should feel immediate: pull fresh data right away (the locked
-// poll may be up to 10 minutes stale).
+// Every lock transition, whatever its origin, funnels through here: locking
+// remembers the data tab we leave and collapses to the clock page; unlocking
+// pulls fresh data immediately (upstream floors make that cheap) and returns
+// to the remembered tab when there is one.
 watch(locked, (v) => {
-  if (!v) refresh(true);
+  if (v) {
+    rememberTab();
+    if (props.tab !== "clock") location.assign("/");
+  } else {
+    refresh(true);
+    const back = consumeTab();
+    if (back && back !== location.pathname) location.assign(back);
+  }
 });
 
-// Honour-system lock: while locked these two are silently ignored — the
-// navbar toggle is the only control that still does anything.
+// While locked these two are silently ignored — the unlock pad is the only
+// control that still does anything.
 function onRefreshData(): void {
   if (locked.value) return;
   refresh(true);
@@ -50,9 +70,34 @@ function reloadPage(): void {
   location.reload();
 }
 
+const pinPad = ref(false);
+
 function onToggleLock(): void {
-  if (locked.value) unlock();
-  else lock(); // persists + navigates to the clock page
+  if (locked.value) {
+    pinPad.value = true;
+    return;
+  }
+  // Locking without a configured PIN would lock the panel out of reach —
+  // refuse with a flash instead (the server's /api/unlock 503 is the belt).
+  if (!props.pinConfigured) {
+    flash.value = "未配置解锁 PIN";
+    return;
+  }
+  void lock(); // POST first, then the watch navigates to the clock page
+}
+
+async function onPinSubmit(pin: string): Promise<void> {
+  const outcome = await unlock(pin);
+  if (outcome === "ok") {
+    pinPad.value = false; // success also navigates/refreshes via the watch
+  } else if (outcome === "unconfigured") {
+    pinPad.value = false;
+    flash.value = "未配置解锁 PIN";
+  } else if (outcome === "wrong") {
+    flash.value = "密码错误"; // pad stays open, digits already cleared
+  } else {
+    flash.value = "⚠ 请求失败";
+  }
 }
 
 // Tasks being completed right now: copy-on-write so every mutation swaps the
@@ -107,6 +152,7 @@ async function onTaskDone(task: TaskRow): Promise<void> {
     @reload-page="reloadPage"
     @toggle-lock="onToggleLock"
   />
+  <PinPad v-if="pinPad" @submit="onPinSubmit" @cancel="pinPad = false" />
   <div class="body">
     <TabRail
       :tab="tab"

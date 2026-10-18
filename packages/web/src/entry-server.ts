@@ -7,8 +7,13 @@ import { vaporInteropPlugin } from "@vue/runtime-vapor";
 import type { PanelState, TabId } from "@mira-panel/shared";
 import App from "./App.vue";
 
-export async function render(tab: TabId, state: PanelState, locked: boolean): Promise<string> {
-  const app = createSSRApp(App, { tab, initial: state, locked });
+export async function render(
+  tab: TabId,
+  state: PanelState,
+  locked: boolean,
+  pinConfigured: boolean,
+): Promise<string> {
+  const app = createSSRApp(App, { tab, initial: state, locked, pinConfigured });
   app.use(vaporInteropPlugin);
   return renderToString(app);
 }

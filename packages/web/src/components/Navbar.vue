@@ -9,7 +9,8 @@ defineProps<{
   flash: string | null;
   /** Server-formatted "HH:MM" of the tab's last successful fetch ("—" if none). */
   fetchedAt: string;
-  /** Honour-system lock; the toggle is the only control that still works. */
+  /** Server-authoritative lease lock; the toggle is the only control that
+   *  still works while locked (it opens the PIN pad, App owns the rest). */
   locked: boolean;
 }>();
 

@@ -32,6 +32,7 @@ import { fetchDeepSeekBalance } from "./data/deepseek.ts";
 import { fetchTavilyUsage } from "./data/tavily.ts";
 import { fetchGlmQuota, fetchGlmUsage, type GlmQuotaBody, type UsageRaw } from "./data/usage.ts";
 import { fetchTasks, type TaskRaw, type VikunjaBody } from "./data/vikunja.ts";
+import type { LockView } from "./lock.ts";
 import { noteClientViewportValues } from "./viewport.ts";
 
 /** Upstream fetch unit. Several topics can share one source (glm:quota and
@@ -39,10 +40,17 @@ import { noteClientViewportValues } from "./viewport.ts";
 export type SourceName = "glm-quota" | "glm-usage" | "vikunja" | "deepseek" | "tavily";
 
 export interface SourceDef<T> {
-  /** Refresh cadence while at least one unlocked subscriber listens. */
+  /** Refresh cadence while the panel is unlocked. */
   intervalMs: number;
-  /** Cadence while every subscriber is locked (e-paper and upstreams quiet). */
+  /** Cadence while the panel is locked (e-paper and upstreams quiet). */
   lockedIntervalMs: number;
+  /** Upstream's own repeat-query floor: EVERY read path serves cache within
+   *  max(intervalMs, floorMs) — periodic ticks, client refreshes, unlock
+   *  bursts and SSR alike — so lock/unlock cycling can never hammer an
+   *  API that allows one query per window (DeepSeek: 5 minutes). Only the
+   *  write route's forceRefresh bypasses it, to see its own write.
+   *  Defaults to intervalMs. */
+  floorMs?: number;
   /** Pure upstream read; throws on failure. */
   fetch: () => Promise<T>;
   /** Body to serve when no fetch ever succeeded (all-null slice). */
@@ -175,7 +183,11 @@ export interface Hub {
   attach(send: (msg: ServerMsg) => void): { message: (raw: string) => void; close: () => void };
 }
 
-export function createHub(build: string, defs: Record<SourceName, SourceDef<unknown>>): Hub {
+export function createHub(
+  build: string,
+  defs: Record<SourceName, SourceDef<unknown>>,
+  lockView?: LockView,
+): Hub {
   interface Run {
     name: SourceName;
     def: SourceDef<unknown>;
@@ -191,9 +203,10 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
   interface Conn {
     send: (msg: ServerMsg) => void;
     topics: Set<TopicId>;
-    locked: boolean;
     ping: ReturnType<typeof setInterval> | undefined;
   }
+
+  const lock: LockView = lockView ?? { isLocked: () => false, onChange: () => () => undefined };
 
   const runs = {} as Record<SourceName, Run>;
   for (const name of Object.keys(defs) as SourceName[])
@@ -208,6 +221,20 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
     };
 
   const conns = new Set<Conn>();
+
+  /** A source's no-touch window: the stricter of the cadence and the
+   *  upstream's own floor (see SourceDef.floorMs). */
+  function floorOf(run: Run): number {
+    return Math.max(run.def.intervalMs, run.def.floorMs ?? run.def.intervalMs);
+  }
+
+  // Lock transitions are edge-broadcast to every connection (pages repaint
+  // the navbar, the companion notifies) and re-arm every timer — the global
+  // lock flips the whole panel's cadence at once.
+  lock.onChange((lockedNow) => {
+    for (const conn of conns) conn.send({ type: "locked", locked: lockedNow, now: Date.now() });
+    for (const name of Object.keys(runs) as SourceName[]) arm(runs[name]);
+  });
 
   // ------------------------------------------------------------- fetching
 
@@ -274,13 +301,13 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
 
   // -------------------------------------------------------------- timers
 
-  /** Fastest cadence any subscriber justifies: one unlocked listener is
-   *  enough to run a source at full speed. */
+  /** The panel is a single global lock: every connection runs at the locked
+   *  cadence or none does. The upstream floor caps the timer too, so a
+   *  future interval shorter than an API's repeat-query window still
+   *  cannot tick through it. */
   function effectiveInterval(run: Run): number {
-    let ms = Infinity;
-    for (const conn of run.subs)
-      ms = Math.min(ms, conn.locked ? run.def.lockedIntervalMs : run.def.intervalMs);
-    return ms === Infinity ? run.def.intervalMs : ms;
+    const cadence = lock.isLocked() ? run.def.lockedIntervalMs : run.def.intervalMs;
+    return Math.max(cadence, run.def.floorMs ?? 0);
   }
 
   function arm(run: Run): void {
@@ -322,7 +349,7 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
   return {
     get(source) {
       const run = runs[source];
-      if (run.last && Date.now() - run.at < run.def.intervalMs) return Promise.resolve(run.last);
+      if (run.last && Date.now() - run.at < floorOf(run)) return Promise.resolve(run.last);
       return tick(run);
     },
     peek(source) {
@@ -349,7 +376,7 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
       return out;
     },
     attach(send) {
-      const conn: Conn = { send, topics: new Set(), locked: false, ping: undefined };
+      const conn: Conn = { send, topics: new Set(), ping: undefined };
       conns.add(conn);
       // App-level keepalive: browser WS ping frames never wake JS, so the
       // client's watchdog can only see JSON pings. Never carries `now` —
@@ -368,9 +395,8 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
           switch (msg?.type) {
             case "subscribe": {
               noteClientViewportValues(msg.vw, msg.vh, msg.dpr);
-              conn.locked = msg.locked;
               setTopics(conn, TOPICS_FOR_TAB[msg.tab as TabId] ?? []);
-              send({ type: "hello", build, now: Date.now() });
+              send({ type: "hello", build, now: Date.now(), locked: lock.isLocked() });
               // Snapshot whatever is cached right now (even stale — the
               // display contract is keep-serving), then let the timer (or a
               // first-ever fetch kicked below) deliver the fresh round.
@@ -386,18 +412,23 @@ export function createHub(build: string, defs: Record<SourceName, SourceDef<unkn
               }
               for (const source of sourcesOf(conn.topics)) {
                 const run = runs[source];
-                if (!run.last || Date.now() - run.at >= run.def.intervalMs) void tick(run);
+                if (!run.last || Date.now() - run.at >= floorOf(run)) void tick(run);
               }
-              break;
-            }
-            case "lock": {
-              conn.locked = msg.locked;
-              reschedule(sourcesOf(conn.topics));
               break;
             }
             case "refresh": {
               void (async () => {
-                await Promise.all([...sourcesOf(conn.topics)].map((s) => tick(runs[s])));
+                // Floor-gated: within the no-touch window the cache IS the
+                // answer — a burst of refreshes (or unlock/lock cycling)
+                // acks without touching the upstream.
+                await Promise.all(
+                  [...sourcesOf(conn.topics)].map((s) => {
+                    const run = runs[s];
+                    return run.last && Date.now() - run.at < floorOf(run)
+                      ? Promise.resolve(run.last)
+                      : tick(run);
+                  }),
+                );
                 send({ type: "ack" });
               })();
               break;
@@ -419,39 +450,46 @@ const MIN = 60_000;
 
 /** Production cadences (see README's 数据流 section):
  *   glm-quota / glm-usage / vikunja — 60s, 10min while locked
- *   deepseek / tavily — 30min (a balance and a monthly credit pool are slow) */
-export function createPanelHub(build: string): Hub {
-  return createHub(build, {
-    "glm-quota": {
-      intervalMs: MIN,
-      lockedIntervalMs: 10 * MIN,
-      fetch: fetchGlmQuota,
-      empty: () => ({ level: "", fiveHour: null, weekly: null, mcp: null }),
+ *   deepseek / tavily — 30min (a balance and a monthly credit pool are slow);
+ *   deepseek also carries a 5min upstream floor — the API allows one query
+ *   per 5 minutes, so no burst path may re-ask it sooner */
+export function createPanelHub(build: string, lockView?: LockView): Hub {
+  return createHub(
+    build,
+    {
+      "glm-quota": {
+        intervalMs: MIN,
+        lockedIntervalMs: 10 * MIN,
+        fetch: fetchGlmQuota,
+        empty: () => ({ level: "", fiveHour: null, weekly: null, mcp: null }),
+      },
+      "glm-usage": {
+        intervalMs: MIN,
+        lockedIntervalMs: 10 * MIN,
+        // null body = never fetched: the usage card hides, never zeroes.
+        fetch: fetchGlmUsage,
+        empty: () => null,
+      },
+      vikunja: {
+        intervalMs: MIN,
+        lockedIntervalMs: 10 * MIN,
+        fetch: fetchTasks,
+        empty: () => ({ counts: null, buckets: null, truncated: false }),
+      },
+      deepseek: {
+        intervalMs: 30 * MIN,
+        lockedIntervalMs: 30 * MIN,
+        floorMs: 5 * MIN,
+        fetch: fetchDeepSeekBalance,
+        empty: () => ({ balance: null, api: null }),
+      },
+      tavily: {
+        intervalMs: 30 * MIN,
+        lockedIntervalMs: 30 * MIN,
+        fetch: fetchTavilyUsage,
+        empty: () => ({ usage: null, api: null }),
+      },
     },
-    "glm-usage": {
-      intervalMs: MIN,
-      lockedIntervalMs: 10 * MIN,
-      // null body = never fetched: the usage card hides, never zeroes.
-      fetch: fetchGlmUsage,
-      empty: () => null,
-    },
-    vikunja: {
-      intervalMs: MIN,
-      lockedIntervalMs: 10 * MIN,
-      fetch: fetchTasks,
-      empty: () => ({ counts: null, buckets: null, truncated: false }),
-    },
-    deepseek: {
-      intervalMs: 30 * MIN,
-      lockedIntervalMs: 30 * MIN,
-      fetch: fetchDeepSeekBalance,
-      empty: () => ({ balance: null, api: null }),
-    },
-    tavily: {
-      intervalMs: 30 * MIN,
-      lockedIntervalMs: 30 * MIN,
-      fetch: fetchTavilyUsage,
-      empty: () => ({ usage: null, api: null }),
-    },
-  });
+    lockView,
+  );
 }

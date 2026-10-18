@@ -97,16 +97,18 @@ README，出现在电子纸上就是噪声。
 
 ### 路由
 
-| 路径                          | 作用                                                                                                              |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页，bootstrap 只嵌 rail 所需的瘦切片）                                                             |
-| `/glm`                        | GLM 面板（SSR，bootstrap 含 quota/usage/deepseek/tavily）                                                         |
-| `/vikunja`                    | Vikunja 面板（SSR，bootstrap 含全量任务桶）                                                                       |
-| `/ws`                         | **稳态数据通道**（WebSocket，见「刷新契约」）：页面声明当前 tab 的 topic，hub 按各源自有节奏推送                  |
-| `/api/raw`                    | hub 里每个源的缓存状态（ok/stale/error/原始 payload）+ 客户端视口（调试用）                                       |
-| `/api/vikunja/tasks/:id/done` | **唯一的写路径**（POST）：勾选完成一个任务。要求 `X-Panel-Write: 1` 头，锁定态 403，返回刷新后的 vikunja 视图模型 |
-| `/healthz`                    | `ok`                                                                                                              |
-| `/<file>`                     | 静态文件（`packages/server/public/` 与 web 构建产物）                                                             |
+| 路径                          | 作用                                                                                                                             |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页，bootstrap 只嵌 rail 所需的瘦切片）                                                                            |
+| `/glm`                        | GLM 面板（SSR，bootstrap 含 quota/usage/deepseek/tavily）                                                                        |
+| `/vikunja`                    | Vikunja 面板（SSR，bootstrap 含全量任务桶）                                                                                      |
+| `/ws`                         | **稳态数据通道**（WebSocket，见「刷新契约」）：页面声明当前 tab 的 topic，hub 按各源自有节奏推送；锁/解锁转移也在这条通道广播    |
+| `/api/raw`                    | hub 里每个源的缓存状态（ok/stale/error/原始 payload）+ 客户端视口（调试用）                                                      |
+| `/api/vikunja/tasks/:id/done` | 写路径（POST）：勾选完成一个任务。要求 `X-Panel-Write: 1` 头，锁定态 403，返回刷新后的 vikunja 视图模型                          |
+| `/api/lock`                   | 写路径（POST）：锁定面板（清空全部租约）。要求 `X-Panel-Write: 1` 头                                                             |
+| `/api/unlock`                 | 写路径（POST）：`{"pin":"…"}` 校验通过后签发 30 分钟解锁租约。要求 `X-Panel-Write: 1` 头；错 PIN 403（连败指数退避）、未配置 503 |
+| `/healthz`                    | `ok`                                                                                                                             |
+| `/<file>`                     | 静态文件（`packages/server/public/` 与 web 构建产物）                                                                            |
 
 `/api/state`（及 `/api/usage` 别名）已随 60 秒轮询一起退役：稳态数据全部走 `/ws` 推送。
 
@@ -213,9 +215,12 @@ GET https://api.tavily.com/usage
   瘦身：时钟页只嵌 GLM 5 小时池 + Vikunja 计数（≈0.5 KB），Vikunja 全量桶只有
   `/vikunja` 页才嵌入——旧版「每页整面板 JSON」的几十 KB 没了
 - **稳态 = WebSocket 声明订阅**：页面挂载后连 `/ws`，发送
-  `{"type":"subscribe","tab":…,"locked":…,"vw":…,"vh":…,"dpr":…}`；服务端 hub 把
+  `{"type":"subscribe","tab":…,"vw":…,"vh":…,"dpr":…}`；服务端 hub 把
   topic 映射到上游取数单元（source），**只有被声明的 source 才有定时器**——深夜
-  无人看屏时上游调用为零，时钟页也永远不会去调 GLM 的 model/tool-usage 端点
+  无人看屏时上游调用为零，时钟页也永远不会去调 GLM 的 model/tool-usage 端点。
+  客户端不再申报锁定：`hello` 携带当前 `locked`（电平，重连对齐），每次锁定/
+  解锁转移广播 `{"type":"locked","locked":…,"now":…}`（边沿，零载荷——解锁
+  永不为数据等：页面从缓存快照起步，新鲜数字随后按节奏以普通 update 到达）
 - **topic 粒度刻意细**（`packages/shared/src/topics.ts` 的 `TOPICS_FOR_TAB`）：
 
   | tab     | 声明的 topic                                                     |
@@ -224,15 +229,20 @@ GET https://api.tavily.com/usage
   | GLM     | `glm:quota`、`glm:usage`、`vikunja:counts`、`deepseek`、`tavily` |
   | Vikunja | `glm:rail`、`vikunja:full`（全量桶，只有这个页面收到）           |
 
-- **服务端节奏**（hub.ts 的 `createPanelHub`，锁定态取 locked 列）：
+- **服务端节奏**（hub.ts 的 `createPanelHub`，锁定态取 locked 列；锁定是**全局**的，
+  所有连接一起换档）：
 
-  | source                          | 活跃节奏    | 锁定节奏 |
-  | ------------------------------- | ----------- | -------- |
-  | glm-quota / glm-usage / vikunja | 60 秒       | 10 分钟  |
-  | deepseek / tavily               | **30 分钟** | 30 分钟  |
+  | source                          | 活跃节奏    | 锁定节奏 | 上游下限（floor） |
+  | ------------------------------- | ----------- | -------- | ----------------- |
+  | glm-quota / glm-usage / vikunja | 60 秒       | 10 分钟  | = 节奏            |
+  | deepseek                        | **30 分钟** | 30 分钟  | **5 分钟**        |
+  | tavily                          | **30 分钟** | 30 分钟  | = 节奏            |
 
-  多个订阅者共享同一定时器（一次上游取数、按 topic 投影后各自推送）；hub 统一持有
-  缓存、in-flight 去重与 stale-on-error（数据层本身是纯取数函数）
+  floor 是上游 API 自己的重复查询下限：**所有取数路径**（周期 tick、`refresh`、
+  解锁触发的刷新、SSR 读取）在 max(节奏, floor) 窗口内一律回缓存——反复解锁/锁定、
+  狂点刷新都打不穿 DeepSeek 的 5 分钟一次限额；唯一豁免是勾选完成后的强制刷新
+  （必须看见自己的写入）。多个订阅者共享同一定时器（一次上游取数、按 topic 投影后
+  各自推送）；hub 统一持有缓存、in-flight 去重与 stale-on-error（数据层本身是纯取数函数）
 
 - **更新即推送**：`{"type":"update","topic":…,"now":…,"data":…}`，载荷是**该 topic 的
   瘦切片**（rail 几十字节；hourly 序列、level、api 原文等 raw-only 字段永不上线）。
@@ -250,22 +260,56 @@ GET https://api.tavily.com/usage
 - **取数失败时**：保留上一次数值 + 标「⚠ 数据陈旧」；**首次就失败**的源也会推送
   错误形状（空切片 + stale 标记），而不是永远沉默——面板绝不整页空白
 
-## 锁定模式（君子协定）
+## 锁定模式（服务端租约 + PIN 解锁）
 
-navbar 右上的 **锁定** 按钮：点击后跳到时钟页并进入锁定态，原按钮变 **解锁**。
+锁是**服务端权威的租约表**（`packages/server/src/lock.ts`），不是 cookie、也不是客户端
+申报——「解锁」的定义是**存在未过期的租约**，谁上锁、谁解锁、租约何时到期，全部只有
+服务器知道，页面上没有可清除或可伪造的状态。
 
-- 锁定态下**只允许看时钟界面**：rail 里 GLM/Vikunja 照常渲染（预览数字可见），但点击
-  **静默无效**（无提示、无 toast）；**直接访问 `/glm`、`/vikunja` 也会被服务端 302 回
-  时钟页**（锁定在 URL 层同样成立）；`刷新数据`/`刷新页面` 同样失效——唯一有效的交互
-  就是解锁按钮
-- 数据订阅的节奏切到锁定档（GLM/Vikunja 源 60 秒 → **10 分钟**；DeepSeek/Tavily 本来
-  就是 30 分钟）；时钟本身照常每分钟走动（纯客户端，不取数）
-- 锁定状态存在 **cookie**（`mira-panel-lock=1`），整页重载 / 部署自重载后仍然保持；
-  cookie 对 SSR 可读，所以锁定后跳转的时钟页**第一帧就是锁定态**（只闪一次，不会先换
-  按钮再换页闪两次）
-- **现阶段是君子协定**，没有真正的访问控制；未来与另一台电脑联动时，把这个 cookie 换成
-  联动信号即可（服务端也能读——接缝在 `packages/web/src/composables/useLock.ts` 与
-  `app.ts` 的 `lockCookie`）
+- **锁定**（navbar 按钮 → `POST /api/lock`）：清空全部租约，跳到时钟页。锁定态下
+  rail 预览照常渲染，但点击静默无效；**直接访问 `/glm`、`/vikunja` 被服务端 302 回
+  时钟页**（锁在 URL 层成立）；`刷新数据`/`刷新页面` 失效；勾选写路径 403
+- **解锁**（锁屏中央的数字键盘输入 4 位 PIN → `POST /api/unlock`）：校验通过签发
+  **30 分钟租约**（从解锁起算，不因活动延长；再解锁再签）。前端先解锁页面、从缓存
+  快照起步，新鲜数据随后按 floor 节奏到达——**永不为数据等解锁**
+- **自动回锁**：租约到期无人续 → 静默回锁并广播（无倒计时，电纸少刷一次）；数据页
+  的 kiosk 整页跳回时钟，并经 `localStorage` 记住锁定前所在 tab，解锁后自动跳回
+- **远程转移即时生效**：锁/解锁的每次转移在 `/ws` 广播；Mac companion、其他浏览器
+  都在同一时刻对齐（重连则由 `hello.locked` 补齐电平）
+- **PIN**：4 位，存 `${XDG_RUNTIME_DIR}/agenix/mira-panel-env` 的 `PANEL_PIN=…`
+  （`PANEL_PIN` 环境变量优先；每次尝试现读，补配后无需重启即可解锁）。未配置时锁定
+  按钮只闪「未配置解锁 PIN」不真锁（防把自己锁在门外；bootstrap 的 `pinConfigured`
+  即此防呆位）
+- **防穷举**：1 万空间靠**连败指数退避**兜底（400ms × 2^(n-1)、封顶 10 分钟；成功或
+  15 分钟无尝试清零）——真正的防线是退避而不是比较本身
+- **持久化与逃生口**：租约表在内存 + `${XDG_RUNTIME_DIR}/mira-panel/leases.json`
+  （转移时覆写），`just deploy`/崩溃重启不丢解锁；**重启机器 = 全部回锁**（runtime
+  目录被清空），忘 PIN 的第一逃生口是补配 agenix，最后逃生口是重启机器
+- **信任层级**（如实）：局域网明文 HTTP，同网段抓包可截获 PIN——与既有君子协定同层；
+  收紧手段是加 TLS/反代，与本机制的密码学选型无关。本期刻意不用 JWT/公私钥：单一
+  验证方（服务器即锁）拓扑下它们没有买主，接缝留在 `lock.ts` 的
+  `authorize → Lease` 一个函数后面
+
+### Mac companion（本期：纯接收通知器）
+
+`packages/companion`——零 npm 依赖的 Node 脚本（Node ≥ 22 的全局 WebSocket），常驻
+连接面板 `/ws`：收 `locked:true` 弹「面板已锁定」，收 `locked:false` 弹
+「面板已解锁（GLM 5h 池 N% · 今日待办 N 项）」（摘要来自缓存更新，尽力而为、
+不强绑）。断线退避重连 + 看门狗，与面板页同契约。它只发一条 subscribe，**不**具备
+锁/解锁能力（远程控制与 Mac 在场自动续租是后续增量，见 TODO）。
+
+在本仓库 flake 里已带 nix-darwin 模块，Mac 侧 nix 配置里：
+
+```nix
+imports = [ mira-panel.darwinModules.panelCompanion ];
+services.mira-panel-companion = {
+  enable = true;
+  panelUrl = "ws://<面板主机>:15932/ws";
+};
+```
+
+（launchd 用户级 agent：通知依赖 GUI 登录会话；脚本直接从 flake store 路径运行，
+无需 node_modules。）
 
 ## 电子纸约束（改设计时请遵守）
 
@@ -329,18 +373,24 @@ chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 
 验收要点：截图与旧版逐字节一致（同等数据下）；浏览器控制台零水合告警；
 `curl -s /glm | grep 亿` 无 JS 也能读到真实数字；`curl -I` 200 无 body、
-`curl -X POST` 405（**唯一例外**：`POST /api/vikunja/tasks/:id/done` 带
-`X-Panel-Write: 1` 时 200，缺头 400，锁定态 403——勾选写路径的验收就用
-一个牺牲任务走这三个分支）。
+`curl -X POST` 405（**例外是三条写路径**：勾选完成 `/api/vikunja/tasks/:id/done`、
+`/api/lock`、`/api/unlock`——都要求 `X-Panel-Write: 1`（缺头 400），勾选路径在
+锁定态 403，unlock 错 PIN 403 / 未配置 503。勾选用一个牺牲任务走分支；锁路径直接
+curl 三态即可）。
 
 ## 安全
 
-- **面板无鉴权，且现在有一条写路径**：局域网内任何设备都能通过
-  `/api/vikunja/tasks/:id/done` 勾掉任务——与锁定模式的君子协定同信任层级（家用
-  可接受）。`X-Panel-Write: 1` 自定义头迫使跨站写入先走 CORS 预检，而本服务永不
-  应答预检，跨站表单/fetch 因此写不进来；锁定 cookie 在服务端也被同一条路径拒绝
-- 四把密钥都**只在服务端内存**中使用：不落盘、不进代码/仓库（GLM 走 `execFile(helper)`
-  的 stdout；Vikunja/DeepSeek/Tavily 走 env 与 agenix 运行时文件的候选链 + Bearer 头）、
+- **面板无鉴权，有三条写路径**（勾选完成、锁定、PIN 解锁）：局域网内任何设备都能
+  勾掉任务或锁定面板——与锁定机制的信任层级一致（家用可接受）。`X-Panel-Write: 1`
+  自定义头迫使跨站写入先走 CORS 预检，而本服务永不
+  应答预检，跨站表单/fetch 因此写不进来；解锁路径额外由 PIN + 连败指数退避把守；
+  勾选路径与数据 tab 在锁定态被服务端直接拒绝（读的是租约表，不是任何客户端状态）
+- PIN 只在服务端比对：解析链 `PANEL_PIN` 环境变量 →
+  `${XDG_RUNTIME_DIR}/agenix/mira-panel-env`（agenix 运行时文件），每次尝试现读；
+  不落码、不进日志、不回发。租约持久化文件 `leases.json` 只含设备名与到期时间戳
+- 四把上游密钥 + 解锁 PIN 都**只在服务端内存**中使用：不落盘、不进代码/仓库（GLM 走
+  `execFile(helper)` 的 stdout；Vikunja/DeepSeek/Tavily 走 env 与 agenix 运行时文件的
+  候选链 + Bearer 头；PIN 走 `mira-panel-env`，每次尝试现读）、
   不写日志、不进 `/api/raw`（raw 只含上游响应原文，均为数字）
 - `DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `TAVILY_PROXY` 是**可选的显式覆盖**；不设时
   自动走 agenix 候选链与 hermes-env 的代理解析
@@ -352,6 +402,13 @@ chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
 - [x] npm workspaces monorepo + 全仓 TS + Hono + Vue 3.6 Vapor 重构
 - [x] WebSocket 声明式订阅改造（hub 统一节奏/缓存/投影，`/api/state` 轮询退役，
       2026-10 已落地）
+- [x] 锁定改为**服务端租约 + PIN 解锁**（cookie 君子协定退役；WS 广播锁转移、
+      上游 floor、Mac companion 通知器，2026-10 已落地）
+- [ ] Mac companion 的**远程控制**（`companion lock` / `unlock <pin>` 子命令——
+      路由已就绪，加个 CLI 即可）
+- [ ] Mac companion 的**在场自动解锁**：设备钥 + 屏幕锁/解锁事件（
+      `com.apple.screenIsLocked/Unlocked`）驱动的 5 分钟可续租约——租约表已按
+      设备维度留好接缝，届时顺手验一次 nix-darwin 模块
 - [ ] 持久化：**已决定先保持现状**（Hermes 后台拉起的进程；gateway 重启后需手动重启）
 - [ ] 还能接哪些数据源（Readeck / FreshRSS / HN）
 - [x] Vikunja 触摸勾选完成（`POST /api/vikunja/tasks/:id/done` + 三层防重复提交，

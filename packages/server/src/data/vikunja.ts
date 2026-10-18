@@ -1,10 +1,9 @@
 // Vikunja data layer (ported from the previous vikunja.mjs).
 //
-// Auth: `Authorization: Bearer <token>`, resolved at runtime in this order:
-//   1. process.env.VIKUNJA_API_KEY
-//   2. ${XDG_RUNTIME_DIR}/agenix/vikunja-env  (agenix-decrypted KEY=VALUE file)
-//   3. ~/.local/share/hermes/.hermes/.env
-// The token never reaches argv or a log; see the panel README's security notes.
+// Auth: `Authorization: Bearer <token>`, resolved at runtime by the panel's
+// own secret store (secrets.ts): process.env.VIKUNJA_API_KEY -> the repo
+// root `.env`. The token never reaches argv or a log; see the panel README's
+// security notes.
 //
 // Query: the web app's own path — per project, its default LIST VIEW's task
 // list (`done = false`, sorted by `position`, the manual drag order), paged
@@ -20,11 +19,9 @@
 // the hub. Only the credential/config caches (token, projects, view ids)
 // stay here: they change on nix rebuild timescales, not panel cadences.
 
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
-
 import type { VikunjaCounts } from "@mira-panel/shared";
+
+import { panelSecret } from "../secrets.ts";
 
 const API = process.env.VIKUNJA_API ?? "https://todo.example.com/api/v1";
 const PAGE_SIZE = 50; // == the instance's max_items_per_page
@@ -68,33 +65,12 @@ interface VikunjaTask {
 let tokenCache: { at: number; token: string | null } = { at: 0, token: null };
 let projectCache: { at: number; list: { id: number; title: string }[] } = { at: 0, list: [] };
 
-async function readTokenFromFile(path: string): Promise<string | null> {
-  try {
-    const text = await readFile(path, "utf8");
-    const line = text.split("\n").find((l) => l.startsWith("VIKUNJA_API_KEY="));
-    if (!line) return null;
-    return line
-      .slice("VIKUNJA_API_KEY=".length)
-      .trim()
-      .replace(/^["']|["']$/g, "");
-  } catch {
-    return null;
-  }
-}
-
 async function token(): Promise<string> {
   if (tokenCache.token && Date.now() - tokenCache.at < PROJECT_TTL_MS) return tokenCache.token;
 
-  const candidates = [
-    process.env.VIKUNJA_API_KEY,
-    await readTokenFromFile(
-      join(process.env.XDG_RUNTIME_DIR ?? "/run/user/1000", "agenix/vikunja-env"),
-    ),
-    await readTokenFromFile(join(homedir(), ".local/share/hermes/.hermes/.env")),
-  ];
-  const found = candidates.find((t) => t && t.length > 10);
-  if (!found)
-    throw new Error("no Vikunja token (env VIKUNJA_API_KEY / agenix vikunja-env / hermes .env)");
+  const found = await panelSecret("VIKUNJA_API_KEY");
+  if (!found || found.length <= 10)
+    throw new Error("no Vikunja token (env VIKUNJA_API_KEY or .env)");
   tokenCache = { at: Date.now(), token: found };
   return found;
 }

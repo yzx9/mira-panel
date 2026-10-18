@@ -11,9 +11,10 @@
 // safety property (and the last-resort escape hatch when a PIN is lost).
 //
 // Crypto: none beyond a plain comparison. The PIN is a 4-digit home-panel
-// secret resolved at runtime from the agenix chain (never in code); the
-// real brute-force defence is the exponential failure ladder below, since
-// the keyspace is 10^4. See README's lock section for the trust level.
+// secret resolved at runtime from the panel's own store (env -> repo-root
+// `.env`, see secrets.ts — never in code); the real brute-force defence is
+// the exponential failure ladder below, since the keyspace is 10^4. See
+// README's lock section for the trust level.
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -25,7 +26,7 @@ import {
   PIN_BACKOFF_RESET_MS,
 } from "@mira-panel/shared";
 
-import { agenixFile, readKeyFile } from "./data/keys.ts";
+import { panelSecret } from "./secrets.ts";
 
 /** Pure: the delay owed for the n-th consecutive failure (1-based). */
 export function backoffDelayMs(
@@ -91,10 +92,7 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
   const file = opts.file;
   const leaseMs = opts.leaseMs ?? LOCK_LEASE_MS;
   const now = opts.now ?? Date.now;
-  const readPin =
-    opts.readPin ??
-    (async () =>
-      process.env.PANEL_PIN ?? (await readKeyFile(agenixFile("mira-panel-env"), "PANEL_PIN")));
+  const readPin = opts.readPin ?? (async () => panelSecret("PANEL_PIN"));
   const backoffBase = opts.backoffBaseMs ?? PIN_BACKOFF_BASE_MS;
   const backoffReset = opts.backoffResetMs ?? PIN_BACKOFF_RESET_MS;
 

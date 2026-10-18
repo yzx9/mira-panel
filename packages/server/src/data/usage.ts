@@ -1,9 +1,11 @@
 // GLM Coding Plan data layer (ported from the previous usage.mjs).
 //
-// Credentials: the Coding Plan API key is resolved at runtime through the same
-// nix-managed chain the `claude` wrapper and cc-keepalive use — wrapper binary
-// -> generated settings JSON -> `apiKeyHelper`. Nothing is hardcoded, so the
-// panel survives every nix rebuild / GC.
+// Credentials: the panel's own store first — process.env / the repo-root
+// `.env` (GLM_API_KEY + GLM_BASE_URL, see secrets.ts). When either is
+// missing it falls back to the nix-managed chain the `claude` wrapper and
+// cc-keepalive use (wrapper binary -> generated settings JSON ->
+// `apiKeyHelper`), so the panel survives every nix rebuild / GC even
+// before `.env` is provisioned. Nothing is hardcoded.
 //
 // Endpoints (documented in zai-org/ZCode, docs/bigmodel-coding-plan-usage-quota.md):
 //   GET <host>/api/monitor/usage/quota/limit      no query params, API-key auth
@@ -27,6 +29,8 @@ import { readFile, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import type { McpDetail, ModelUsage, ToolCall } from "@mira-panel/shared";
+
+import { panelSecret } from "../secrets.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -125,9 +129,17 @@ interface Credentials {
 
 let cred: Credentials | null = null;
 
-/** Resolve { host, key } from the nix-generated claude wrapper. */
+/** Resolve { host, key }: the panel's own .env first, then the nix-generated
+ *  claude wrapper chain (which stays as the migration fallback). */
 async function credentials(): Promise<Credentials> {
   if (cred && Date.now() - cred.at < CRED_TTL_MS) return cred;
+
+  const ownKey = await panelSecret("GLM_API_KEY");
+  const ownBase = await panelSecret("GLM_BASE_URL");
+  if (ownKey && ownBase) {
+    cred = { at: Date.now(), base: ownBase, host: new URL(ownBase).origin, key: ownKey };
+    return cred;
+  }
 
   const wrapper = await realpath(CLAUDE_WRAPPER);
   const wrapperText = await readFile(wrapper, "utf8");

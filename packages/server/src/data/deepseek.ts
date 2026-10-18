@@ -5,19 +5,18 @@
 // arrive as STRINGS; there is no usage/token endpoint, so this is purely a
 // balance snapshot. Refreshed every 30 minutes — a balance changes slowly.
 //
-// Key chain (live-verified): the DEEPSEEK_API_KEY in agenix/llm-api-keys is
-// STALE (authentication_error); the one in agenix/hermes-env is valid. Keys
-// are therefore tried as env -> hermes-env -> llm-api-keys: an HTTP 401/403
-// rotates to the next candidate and the winner is cached and tried first
-// until it 401s again. Key values exist only in server memory — never in
-// error strings, never in the data objects (hence never in /api/raw).
+// Key resolution: process.env.DEEPSEEK_API_KEY -> the repo root `.env`
+// (secrets.ts — the panel's own store). An HTTP 401/403 clears the cached
+// winner so the next fetch re-resolves (a rotated key takes effect without
+// a restart). Key values exist only in server memory — never in error
+// strings, never in the data objects (hence never in /api/raw).
 //
 // The exported fetcher is a pure upstream read that throws on failure —
 // caching, cadence and the stale-on-error contract live in the hub.
 
 import type { DeepSeekBalance } from "@mira-panel/shared";
 
-import { agenixFile, readKeyFile } from "./keys.ts";
+import { panelSecret } from "../secrets.ts";
 
 const API = "https://api.deepseek.com/user/balance";
 const REQUEST_TIMEOUT_MS = 12 * 1000;
@@ -70,19 +69,11 @@ export function parseBalance(json: DeepSeekResponse | null): { balance: DeepSeek
 /** Last key the API accepted; tried first while it keeps working. */
 let keyCache: { key: string } | null = null;
 
+/** The single configured key (env -> .env); a list only because the 401
+ *  rotation machinery below consumes lists. */
 async function candidates(): Promise<string[]> {
-  const list = [
-    process.env.DEEPSEEK_API_KEY ?? null,
-    ...(await Promise.all(
-      ["hermes-env", "llm-api-keys"].map((f) => readKeyFile(agenixFile(f), "DEEPSEEK_API_KEY")),
-    )),
-  ];
-  const seen = new Set<string>();
-  return list.filter((k): k is string => {
-    if (!k || k.length <= 10 || seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const key = await panelSecret("DEEPSEEK_API_KEY");
+  return key && key.length > 10 ? [key] : [];
 }
 
 async function fetchBalance(key: string): Promise<unknown> {

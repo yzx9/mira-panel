@@ -5,9 +5,13 @@
 // local HTTP proxy via a per-request undici ProxyAgent (Node's native fetch
 // honors init.dispatcher — verified on Node 24). Proxy URL resolution order:
 //   TAVILY_PROXY -> HTTPS_PROXY -> ALL_PROXY   (process env)
-//   -> ALL_PROXY / HTTPS_PROXY from agenix/hermes-env   (the panel process may
-//      not inherit the desktop session env)
+//   -> ALL_PROXY / HTTPS_PROXY from the repo root .env   (the panel process
+//      may not inherit the desktop session env)
 //   -> direct (last resort; expected to time out here)
+//
+// Key resolution: process.env.TAVILY_API_KEY -> the repo root `.env`
+// (secrets.ts). A 401/403 clears the cached winner; a rotated key takes
+// effect on the next fetch without a restart.
 //
 // The endpoint is rate-limited to 10 requests / 10 minutes; the hub refreshes
 // this source every 30 minutes, comfortably inside the window even if other
@@ -21,12 +25,11 @@
 // The exported fetcher is a pure upstream read that throws on failure —
 // caching, cadence and the stale-on-error contract live in the hub.
 
-import { readFile } from "node:fs/promises";
 import { ProxyAgent } from "undici";
 
 import type { TavilyUsage } from "@mira-panel/shared";
 
-import { agenixFile, keyFromText, readKeyFile } from "./keys.ts";
+import { panelSecret } from "../secrets.ts";
 
 const API = "https://api.tavily.com/usage";
 const REQUEST_TIMEOUT_MS = 12 * 1000;
@@ -94,19 +97,11 @@ export function parseUsage(json: TavilyResponse | null): { usage: TavilyUsage | 
 /** Last key the API accepted; tried first while it keeps working. */
 let keyCache: { key: string } | null = null;
 
+/** The single configured key (env -> .env); a list only because the 401
+ *  rotation machinery below consumes lists. */
 async function candidates(): Promise<string[]> {
-  const list = [
-    process.env.TAVILY_API_KEY ?? null,
-    ...(await Promise.all(
-      ["hermes-env", "llm-api-keys"].map((f) => readKeyFile(agenixFile(f), "TAVILY_API_KEY")),
-    )),
-  ];
-  const seen = new Set<string>();
-  return list.filter((k): k is string => {
-    if (!k || k.length <= 10 || seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const key = await panelSecret("TAVILY_API_KEY");
+  return key && key.length > 10 ? [key] : [];
 }
 
 // ------------------------------------------------------------------- proxy
@@ -119,13 +114,8 @@ function normaliseProxy(url: string): string {
 async function proxyUrl(): Promise<string | null> {
   const fromEnv = process.env.TAVILY_PROXY || process.env.HTTPS_PROXY || process.env.ALL_PROXY;
   if (fromEnv) return normaliseProxy(fromEnv);
-  try {
-    const text = await readFile(agenixFile("hermes-env"), "utf8");
-    const fromFile = keyFromText(text, "ALL_PROXY") ?? keyFromText(text, "HTTPS_PROXY");
-    return fromFile ? normaliseProxy(fromFile) : null;
-  } catch {
-    return null; // direct — will likely time out, but it is the honest fallback
-  }
+  const fromFile = (await panelSecret("ALL_PROXY")) ?? (await panelSecret("HTTPS_PROXY"));
+  return fromFile ? normaliseProxy(fromFile) : null; // null = direct, the honest fallback
 }
 
 let agentCache: { url: string; agent: ProxyAgent } | null = null;

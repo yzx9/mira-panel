@@ -125,8 +125,10 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
 ```
 
 - `Authorization: <完整 API key>` —— **不要加 `Bearer` 前缀，加了会鉴权失败**
-- host 由 nix 生成的 `claude-code-glm-settings.json` 里的 `ANTHROPIC_BASE_URL` 推导
-- key 由 `apiKeyHelper` 在**服务端**运行时解析（无硬编码 store 路径 → 每次 nix rebuild 都不会失效）
+- 凭据来源：**面板自管 `.env` 优先**（`GLM_API_KEY` + `GLM_BASE_URL`，见「安全」节的
+  密钥管理）；未配置时回退到 nix 生成的 `claude-code-glm-settings.json` 链
+  （host 由 `ANTHROPIC_BASE_URL` 推导、key 由 `apiKeyHelper` 在服务端运行时解析，
+  无硬编码 store 路径 → 每次 nix rebuild 都不会失效）
 - 额度项按 `type + unit + number` 识别，**不能按下标兜底**：
   - `TOKENS_LIMIT unit=3 number=5` → 5 小时池
   - `TOKENS_LIMIT unit=6 number=1` → 周池（部分账号不返回 → 隐藏该项）
@@ -143,8 +145,8 @@ GET https://todo.example.com/api/v1/projects
 GET /api/v1/projects/{id}/tasks?filter=done = false&sort_by=position&order_by=asc&per_page=50&page=N
 ```
 
-- `Authorization: Bearer <token>`，token 运行时按顺序解析：`VIKUNJA_API_KEY` 环境变量 →
-  `${XDG_RUNTIME_DIR}/agenix/vikunja-env`（agenix 解密）→ Hermes 的 `.env`
+- `Authorization: Bearer <token>`，token 由**面板自管 `.env`** 解析（`VIKUNJA_API_KEY`，
+  环境变量同名覆盖；见「安全」节的密钥管理）
 - **逐项目分页拉全**：实例 `max_items_per_page = 50`，更大的 `per_page` 会被**静默钳到
   50**（go-vikunja/vikunja#2239）；且 `position` 排序**只在项目上下文可用**（全局
   `/tasks` 会 400 要求 project view id）。所以先取项目列表、再逐项目按 50/页拉到短页、
@@ -171,9 +173,8 @@ GET https://api.deepseek.com/user/balance
 
 - `Authorization: Bearer <key>`，**直连**（不走代理）；金额是**字符串**（CNY/USD，
   多币种时取 CNY 条目）；官方只有余额端点、**没有用量端点**
-- key 运行时按序尝试：`DEEPSEEK_API_KEY` 环境变量 → `${XDG_RUNTIME_DIR}/agenix/hermes-env`
-  → `agenix/llm-api-keys`（**llm-api-keys 里的那把已失效**，靠 401 轮换兜底：认证失败
-  自动换下一把候选，胜者缓存优先复用，全部失败才报错）
+- key 由**面板自管 `.env`** 解析（`DEEPSEEK_API_KEY`，环境变量同名覆盖）；401 清空缓存
+  胜者、下次取数重新解析——换 key 改文件即可生效，无需重启
 - `balance_infos` 为空 → 卡片显示空态；`is_available:false` → 标「不可用」tag
 - hub 刷新节奏 **30 分钟**（余额变化慢），出错保旧值标陈旧
 
@@ -187,12 +188,13 @@ GET https://api.tavily.com/usage
   `plan_usage` / `plan_limit`）+ 本 key 计数；`plan_limit` 为 null（无限额）时不画进度条
 - 本机直连超时，请求经**本地 HTTP 代理**走 undici `ProxyAgent`（per-request
   dispatcher，其余数据源不受影响）。代理解析顺序：`TAVILY_PROXY` → `HTTPS_PROXY` →
-  `ALL_PROXY`（进程 env）→ hermes-env 文件里的 `ALL_PROXY`/`HTTPS_PROXY` → 直连兜底
+  `ALL_PROXY`（进程 env）→ `.env` 里的 `ALL_PROXY`/`HTTPS_PROXY` → 直连兜底
 - 端点限频 **10 次/10 分钟** → hub 刷新节奏 **30 分钟**（只在 GLM 页被订阅时才取），
   远在限频窗口之内。撞到 429 只会标陈旧，自愈
 - **月度重置时间是推导值**：响应里没有时间戳，卡片在渲染时按 `state.now` 算下月 1 日
   （`nextMonthStart`），随推送自动推进
-- key 候选链与 401 轮换同 DeepSeek（`TAVILY_API_KEY` env → hermes-env → llm-api-keys）
+- key 由**面板自管 `.env`** 解析（`TAVILY_API_KEY`，环境变量同名覆盖）；401 轮换语义
+  同 DeepSeek
 
 ### 已知限制
 
@@ -276,15 +278,15 @@ GET https://api.tavily.com/usage
   的 kiosk 整页跳回时钟，并经 `localStorage` 记住锁定前所在 tab，解锁后自动跳回
 - **远程转移即时生效**：锁/解锁的每次转移在 `/ws` 广播；Mac companion、其他浏览器
   都在同一时刻对齐（重连则由 `hello.locked` 补齐电平）
-- **PIN**：4 位，存 `${XDG_RUNTIME_DIR}/agenix/mira-panel-env` 的 `PANEL_PIN=…`
-  （`PANEL_PIN` 环境变量优先；每次尝试现读，补配后无需重启即可解锁）。未配置时锁定
+- **PIN**：4 位，存**面板自管 `.env`** 的 `PANEL_PIN=…`（环境变量同名优先；每次尝试
+  现读，补配后无需重启即可解锁）。未配置时锁定
   按钮只闪「未配置解锁 PIN」不真锁（防把自己锁在门外；bootstrap 的 `pinConfigured`
   即此防呆位）
 - **防穷举**：1 万空间靠**连败指数退避**兜底（400ms × 2^(n-1)、封顶 10 分钟；成功或
   15 分钟无尝试清零）——真正的防线是退避而不是比较本身
 - **持久化与逃生口**：租约表在内存 + `${XDG_RUNTIME_DIR}/mira-panel/leases.json`
   （转移时覆写），`just deploy`/崩溃重启不丢解锁；**重启机器 = 全部回锁**（runtime
-  目录被清空），忘 PIN 的第一逃生口是补配 agenix，最后逃生口是重启机器
+  目录被清空），忘 PIN 的第一逃生口是补配 `.env`，最后逃生口是重启机器
 - **信任层级**（如实）：局域网明文 HTTP，同网段抓包可截获 PIN——与既有君子协定同层；
   收紧手段是加 TLS/反代，与本机制的密码学选型无关。本期刻意不用 JWT/公私钥：单一
   验证方（服务器即锁）拓扑下它们没有买主，接缝留在 `lock.ts` 的
@@ -380,22 +382,29 @@ curl 三态即可）。
 
 ## 安全
 
+### 密钥管理（面板自管 `.env`）
+
+密钥由**面板自己管理**，不再依赖 Nix/agenix 侧：仓库根的 **`.env`**（git-ignored，
+模板见 `.env.example`）是唯一密钥文件，由你本机的密钥机制（gopass 等）负责填充与轮换。
+解析在 `packages/server/src/secrets.ts`：**同名环境变量优先 → `.env` 文件**，且
+**每次使用现读**——配新 key、换 key 都不需要重启服务。
+
+- 收录的键：`PANEL_PIN`、`VIKUNJA_API_KEY`、`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、
+  代理 `HTTPS_PROXY`/`ALL_PROXY`，以及可选的 GLM 对（`GLM_API_KEY` + `GLM_BASE_URL`）
+- GLM 对未配置时回退旧的 nix 生成链（`claude` wrapper → settings JSON →
+  `apiKeyHelper`），`.env` 填好即切换——迁移零风险
+- 值只在服务端内存中转：直达上游请求头或 PIN 比对，不落码、不写日志、不回发、
+  不进 `/api/raw`；`leases.json` 只含设备名与到期时间戳
+- **`.env` 绝不进仓库**（已 git-ignore）；也不要把值内联进命令行/prompt——
+  Hermes 会把工具调用参数原文写进 `state.db`（显示层的 `***` 只是显示层）
+
+### 信任层级
+
 - **面板无鉴权，有三条写路径**（勾选完成、锁定、PIN 解锁）：局域网内任何设备都能
   勾掉任务或锁定面板——与锁定机制的信任层级一致（家用可接受）。`X-Panel-Write: 1`
   自定义头迫使跨站写入先走 CORS 预检，而本服务永不
   应答预检，跨站表单/fetch 因此写不进来；解锁路径额外由 PIN + 连败指数退避把守；
   勾选路径与数据 tab 在锁定态被服务端直接拒绝（读的是租约表，不是任何客户端状态）
-- PIN 只在服务端比对：解析链 `PANEL_PIN` 环境变量 →
-  `${XDG_RUNTIME_DIR}/agenix/mira-panel-env`（agenix 运行时文件），每次尝试现读；
-  不落码、不进日志、不回发。租约持久化文件 `leases.json` 只含设备名与到期时间戳
-- 四把上游密钥 + 解锁 PIN 都**只在服务端内存**中使用：不落盘、不进代码/仓库（GLM 走
-  `execFile(helper)` 的 stdout；Vikunja/DeepSeek/Tavily 走 env 与 agenix 运行时文件的
-  候选链 + Bearer 头；PIN 走 `mira-panel-env`，每次尝试现读）、
-  不写日志、不进 `/api/raw`（raw 只含上游响应原文，均为数字）
-- `DEEPSEEK_API_KEY` / `TAVILY_API_KEY` / `TAVILY_PROXY` 是**可选的显式覆盖**；不设时
-  自动走 agenix 候选链与 hermes-env 的代理解析
-- **绝不要把密钥内联到命令行/prompt**：Hermes 会把工具调用参数原文写进 `state.db`
-  （显示层的 `***` 只是显示层）
 
 ## TODO
 
@@ -424,8 +433,8 @@ curl 三态即可）。
 cd ~/git/mira-panel
 npm install          # 仅在依赖变化后需要（如新增 undici 那次）
 npm run build        # 若 web 构建产物不存在
-npm start            # Tavily 代理无需显式指定：进程 env 没有代理时会自动读
-                     # agenix/hermes-env 里的 ALL_PROXY；要覆盖就 TAVILY_PROXY=… npm start
+npm start            # 密钥与 Tavily 代理读仓库根 .env（环境变量同名覆盖）；
+                     # 要临时覆盖就 TAVILY_PROXY=… npm start
 ```
 
 kiosk 只在**服务器重启后拿到新 build id** 才整页自刷新 —— 光 build 不重启，面板不会变。

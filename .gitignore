@@ -3,6 +3,9 @@
 node_modules/
 .DS_Store
 
+# The panel's own secret store (see .env.example) — never commit values
+.env
+
 # Build output (web client + SSR bundles)
 dist/
 

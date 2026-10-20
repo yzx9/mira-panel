@@ -1,6 +1,6 @@
-// Panel-secret store tests: precedence (env wins), .env fallback parsing,
-// and the honest nulls (missing file, missing name). Real temp files, no
-// real secrets — the fixture values are dummies.
+// Panel-secret store tests: precedence (env wins), file fallback parsing,
+// the PANEL_ENV_FILE override, and the honest nulls (missing file, missing
+// name). Real temp files, no real secrets — the fixture values are dummies.
 
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -17,7 +17,7 @@ async function envFile(lines: string[]): Promise<string> {
   return file;
 }
 
-test("process.env outranks the .env file", async () => {
+test("process.env outranks any file", async () => {
   const prev = process.env.MIRA_TEST_SECRET;
   try {
     process.env.MIRA_TEST_SECRET = "from-env";
@@ -29,7 +29,7 @@ test("process.env outranks the .env file", async () => {
   }
 });
 
-test("falls back to the .env file, quotes stripped, comments ignored", async () => {
+test("falls back to the file, quotes stripped, comments ignored", async () => {
   const file = await envFile([
     "# panel secrets",
     'PANEL_PIN="1234"',
@@ -37,6 +37,19 @@ test("falls back to the .env file, quotes stripped, comments ignored", async () 
   ]);
   assert.equal(await panelSecret("PANEL_PIN", file), "1234");
   assert.equal(await panelSecret("VIKUNJA_API_KEY", file), "tk-from-file");
+});
+
+test("PANEL_ENV_FILE outranks the local .env (the deploy script's lever)", async () => {
+  const prev = process.env.PANEL_ENV_FILE;
+  try {
+    const explicit = await envFile(["PANEL_PIN=from-explicit"]);
+    process.env.PANEL_ENV_FILE = explicit;
+    // file is unset, so the override wins over the local .env default
+    assert.equal(await panelSecret("PANEL_PIN"), "from-explicit");
+  } finally {
+    if (prev === undefined) delete process.env.PANEL_ENV_FILE;
+    else process.env.PANEL_ENV_FILE = prev;
+  }
 });
 
 test("missing file and missing names resolve null, never throw", async () => {

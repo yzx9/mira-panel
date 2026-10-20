@@ -133,12 +133,12 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
   // ------------------------------------------------------------ transitions
 
   function isLocked(): boolean {
-    const alive = pruneLeases(leases, now());
-    if (Object.keys(alive).length !== Object.keys(leases).length) {
-      // Lazy pruning covers timer drift; the timer below does the broadcast.
-      leases = alive;
-    }
-    return Object.keys(leases).length === 0;
+    // Non-mutating on purpose: the expiry timer OWNS the prune + transition
+    // broadcast. A mutating read raced the timer and silently dropped the
+    // locked event (observed as a flake under parallel test load) — state
+    // reads never announce, only the timer does.
+    const nowMs = now();
+    return !Object.values(leases).some((until) => until > nowMs);
   }
 
   function armExpiry(): void {

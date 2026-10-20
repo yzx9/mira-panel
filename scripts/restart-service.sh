@@ -12,6 +12,8 @@
 # serve an unmerged branch from its worktree to eyeball it on the kiosk.
 # Stop that server before deleting the worktree, or it turns into the ghost
 # above — after merging, `just deploy` from the main checkout replaces it.
+# A preview also gets the main checkout's .env handed over via
+# PANEL_ENV_FILE — worktrees carry no secrets of their own (git-ignored).
 #
 # Env overrides: PORT (default 15932).
 set -euo pipefail
@@ -39,6 +41,19 @@ if [ -f "$ROOT/.git" ]; then
   fi
   echo "restart-service: WARNING: preview deploy from a git worktree ($ROOT)" >&2
   echo "restart-service: stop this server before deleting the worktree — it would ghost" >&2
+
+  # The preview needs the real secrets: resolve the main checkout from the
+  # worktree pointer and point the server at its .env explicitly. Secrets
+  # never move — the server just reads the file where it lives.
+  gitdir="$(sed -n 's/^gitdir: //p' "$ROOT/.git" | head -n1)"
+  case "$gitdir" in /*) ;; *) gitdir="$ROOT/$gitdir" ;; esac
+  main_root="$(cd "$(dirname "$(dirname "$gitdir")")/.." && pwd)"
+  if [ -n "${main_root:-}" ] && [ -f "$main_root/.env" ]; then
+    export PANEL_ENV_FILE="$main_root/.env"
+    echo "restart-service: secrets from the main checkout: $PANEL_ENV_FILE" >&2
+  else
+    echo "restart-service: WARNING: no .env in the main checkout — this preview runs without a PIN/upstream keys" >&2
+  fi
 fi
 
 listening() { ss -tln 2>/dev/null | grep -qE ":$PORT "; }

@@ -48,7 +48,8 @@ devShell 提供 `nodejs_24`（原生 type-stripping 跑 `.ts`，无需编译）�
 `scripts/restart-service.sh`：按端口找进程 → kill → 从**主 checkout** setsid 拉起新进程
 → healthz 验证。脚本会在 git worktree 里直接拒绝执行——从 worktree 起的服务在 worktree
 被删后会变成幽灵进程（2026-10-15 的事故）；要看未合并分支的效果用**预览部署**：
-`just restart force`（等价于 `restart-service.sh --force` / `FORCE=1`），合并后记得从
+`just restart force`（等价于 `restart-service.sh --force` / `FORCE=1`；预览自动经
+`PANEL_ENV_FILE` 继承主 checkout 的 `.env`，见「安全」节），合并后记得从
 主 checkout `just deploy` 替换掉它。
 
 ## 页面结构
@@ -386,8 +387,12 @@ curl 三态即可）。
 
 密钥由**面板自己管理**，不再依赖 Nix/agenix 侧：仓库根的 **`.env`**（git-ignored，
 模板见 `.env.example`）是唯一密钥文件，由你本机的密钥机制（gopass 等）负责填充与轮换。
-解析在 `packages/server/src/secrets.ts`：**同名环境变量优先 → `.env` 文件**，且
-**每次使用现读**——配新 key、换 key 都不需要重启服务。
+解析在 `packages/server/src/secrets.ts`：**同名环境变量 → `PANEL_ENV_FILE` 指定文件 →
+仓库根 `.env`**，且**每次使用现读**——配新 key、换 key 都不需要重启服务。
+
+**预览部署**（worktree 起 `--force` 服务）没有自己的 `.env`（git-ignored），
+`restart-service.sh` 会从 worktree 指针解析出主 checkout，把主 `.env` 的路径经
+`PANEL_ENV_FILE` 显式传给预览服务——密钥原地不动，业务代码不感知 worktree。
 
 - 收录的键：`PANEL_PIN`、`VIKUNJA_API_KEY`、`DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、
   代理 `HTTPS_PROXY`/`ALL_PROXY`，以及可选的 GLM 对（`GLM_API_KEY` + `GLM_BASE_URL`）

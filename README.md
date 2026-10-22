@@ -284,11 +284,13 @@ GET https://api.tavily.com/usage
 - **主控设备在场租约**（`POST /api/presence`，`{"key":…,"present":…}`）：主控设备（`"controller"`）的
   **5 分钟租约**（`PRESENCE_LEASE_MS`），设备屏幕解锁即签/续（companion 每
   `PRESENCE_RENEW_MS`=2 分钟一续，解锁事件即时发不等周期）；屏幕锁定 → companion 发
-  `present:false` **立即清空全部租约**（kiosk 的 PIN 租约一并作废——在场是常态票、
-  PIN 是临时票）；`present:false` 丢失（合盖/睡眠/断网）由 5 分钟 TTL 兜底，
-  **主控租约超时同样整表清空**。key 为 `PANEL_CONTROLLER_KEY` 明文比对（长随机钥即防线，
-  无退避梯），每次请求现读。kiosk 手动锁定后 companion 会听到 `locked:true`
-  广播并**暂停续租**，直到屏幕下次解锁——否则下一个续租 tick 会悄悄翻掉锁定按钮
+  `present:false` **立即清空全部租约**（kiosk 的 PIN 租约一并作废）——**屏幕锁定事件是
+  唯一能提前终结 PIN 租约的 presence 事件**。`present:false` 丢失（合盖/睡眠/断网）由
+  5 分钟 TTL 兜底：主控租约超时**只回收它自己**，kiosk 的 PIN 租约照常走完自己的
+  30 分钟（PIN 解锁的时长承诺只有显式 goodbye、锁定按钮或到期才能终结）。key 为
+  `PANEL_CONTROLLER_KEY` 明文比对（长随机钥即防线，无退避梯），每次请求现读。
+  kiosk 手动锁定后 companion 会听到 `locked:true` 广播并**暂停续租**，屏幕下次解锁、
+  或面板再次解锁的广播会恢复续租——否则下一个续租 tick 会悄悄翻掉锁定按钮
 - **PIN**：4 位，存**面板自管 `.env`** 的 `PANEL_PIN=…`（环境变量同名优先；每次尝试
   现读，补配后无需重启即可解锁）。未配置时锁定
   按钮只闪「未配置解锁 PIN」不真锁（防把自己锁在门外；bootstrap 的 `pinConfigured`

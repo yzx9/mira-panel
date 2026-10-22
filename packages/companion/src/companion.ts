@@ -12,11 +12,14 @@
 // PANEL_CONTROLLER_KEY_FILE are configured, the companion also drives the panel's
 // "controller" lease — screen unlocked -> POST /api/presence {present:true} now
 // and every PRESENCE_RENEW_MS; screen locked -> {present:false} once, which
-// re-locks the panel immediately (the 5-minute lease TTL is only the
-// fallback for a goodbye lost to sleep/network). Manual kiosk locks are
-// honoured: a locked:true broadcast sets a hold that stops renewals until
-// the screen cycles unlocked again — otherwise the next renewal tick would
-// silently undo the lock button.
+// re-locks the panel immediately. A goodbye lost to sleep/network only lets
+// the 5-minute lease lapse, which prunes itself: kiosk PIN leases run out
+// their own clock, so only a real screen-lock event can end one early.
+// Manual kiosk locks are honoured: a locked:true broadcast sets a hold that
+// stops renewals; any live unlock broadcast (or the screen cycling) lifts
+// the hold — else the next renewal tick would silently undo the lock
+// button, and a renewal straggler racing the expiry timer could cascade
+// into repeated TTL re-locks.
 //
 // ZERO npm dependencies on purpose: the flake's darwin module runs this file
 // straight from the flake store path, and flake sources exclude node_modules
@@ -258,11 +261,14 @@ function connect(): void {
         // The transitions the companion exists for. Unlock never waits for
         // data: fresh numbers land as ordinary updates a beat later.
         notify(msg.locked ? "面板已锁定" : `面板已解锁${summary()}`);
-        // Presence hold: a LIVE locked broadcast is a manual kiosk lock —
-        // stop renewing until the screen cycles, or the next tick would
-        // undo the lock button. hello.locked (reconnect level) deliberately
-        // does not set this: that may be our own lease lapsing offline.
-        if (presenceConfigured && msg.locked) presenceHold = true;
+        // Presence hold tracks the live level: locked stops renewing (a
+        // manual kiosk lock must survive the next tick), any live unlock
+        // lifts the hold — the panel is open again, and a renewal straggler
+        // landing right after the expiry timer raced it must not leave the
+        // hold stuck re-locking every TTL. hello.locked (reconnect level)
+        // deliberately does neither: that may be our own lease lapsing
+        // offline.
+        if (presenceConfigured) presenceHold = msg.locked;
         break;
       case "update":
         if (msg.topic === "glm:rail")

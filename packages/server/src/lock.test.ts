@@ -199,24 +199,25 @@ test("the controller lease renews silently, expires loudly, on its own short clo
   assert.deepEqual(events, [false, true]);
 });
 
-test("a lapsed controller lease re-locks EVERYTHING, the kiosk PIN lease included", async () => {
-  const { lock, file } = await testLock(["1234"], 60_000, { key: "sekret", leaseMs: 30 });
-  await lock.unlockWithPin("1234"); // kiosk: 60s
+test("a lapsed controller lease prunes only itself — the kiosk PIN lease runs out its own clock", async () => {
+  const { lock } = await testLock(["1234"], 120, { key: "sekret", leaseMs: 30 });
   await lock.setPresence("sekret", true); // controller: 30ms
-  const events: boolean[] = [];
-  lock.onChange((v) => events.push(v));
-  await waitFor(() => events.length >= 1, 2000, "controller expiry clearing all");
-  assert.deepEqual(events, [true]);
-  assert.equal(lock.isLocked(), true);
-  // persist() is fire-and-forget in the timer — poll the file, don't race it.
-  await waitFor(
-    async () => {
-      const parsed = JSON.parse(await readFile(file, "utf8")) as { leases: Record<string, number> };
-      return Object.keys(parsed.leases).length === 0;
-    },
-    1000,
-    "cleared table persisted",
+  await lock.unlockWithPin("1234"); // kiosk: 120ms
+  let lockedAt = 0;
+  const start = Date.now();
+  lock.onChange((v) => {
+    if (v) lockedAt = Date.now();
+  });
+  // A table-wiping lapse would lock at the controller's ~30ms expiry; with
+  // prune-only the panel must hold unlocked until the kiosk lease's own
+  // 120ms clock runs out. Timer latency only ever delays, never advances,
+  // so the >= 100ms floor is safe under parallel test load.
+  await waitFor(() => lockedAt > 0, 3000, "the kiosk lease expiring");
+  assert.ok(
+    lockedAt - start >= 100,
+    `locked after ${lockedAt - start}ms — the controller lapse wiped the table`,
   );
+  assert.equal(lock.isLocked(), true);
 });
 
 test("a lapsed kiosk lease alone leaves the controller presence untouched", async () => {

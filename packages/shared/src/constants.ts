@@ -31,11 +31,14 @@ export const LIST_PAGE_ROWS = 14;
 // transition. Leases live in server memory + a runtime-dir file only.
 export const LOCK_LEASE_MS = 30 * 60_000;
 
-// Mac presence lease: while the Mac's screen is unlocked the companion
-// renews the "mac" lease every PRESENCE_RENEW_MS; the screen locking (or the
-// Mac vanishing) stops the renewals, so the panel re-locks within
-// PRESENCE_LEASE_MS of the last renewal even if the explicit goodbye POST is
-// lost. Two missed renewals drop the lease; one missed renewal survives.
+// Controller presence lease: while the controller's screen is unlocked the
+// companion renews the "controller" lease every PRESENCE_RENEW_MS; the
+// screen locking (or the device vanishing) stops the renewals, so the lease
+// lapses and a presence-only unlock re-locks within PRESENCE_LEASE_MS of
+// the last renewal even if the explicit goodbye POST is lost. The lapse
+// prunes only the controller lease itself — a kiosk PIN lease always lives
+// out LOCK_LEASE_MS; only the goodbye (a real screen-lock event) clears
+// more. Two missed renewals drop the lease; one missed renewal survives.
 export const PRESENCE_LEASE_MS = 5 * 60_000;
 export const PRESENCE_RENEW_MS = 2 * 60_000;
 

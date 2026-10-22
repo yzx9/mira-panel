@@ -67,8 +67,10 @@ export interface LockModule extends LockView {
   unlockWithPin(pin: string): Promise<UnlockResult>;
   /** Controller presence: verified against PANEL_CONTROLLER_KEY (fresh read per call).
    *  present:true issues/renews the short presence lease; present:false is the
-   *  controller leaving — it clears EVERY lease, the kiosk PIN lease included
-   *  (presence is the standing ticket, the PIN a temporary one). */
+   *  controller's screen locking — the one presence event that clears EVERY
+   *  lease, the kiosk PIN lease included. A presence lease that merely lapses
+   *  (goodbye lost) prunes only itself: a kiosk PIN lease always runs out its
+   *  own clock. */
   setPresence(key: string, present: boolean): Promise<PresenceResult>;
   /** Re-read the PIN file once; boot awaits it to warm the cache. */
   warm(): Promise<void>;
@@ -99,7 +101,9 @@ interface PersistedShape {
 
 const KIOSK_DEVICE = "kiosk";
 /** The controller companion's lease; short-lived by design — the screen
- *  locking stops its renewals and the panel re-locks (PRESENCE_LEASE_MS). */
+ *  locking stops its renewals, so the lease lapses (PRESENCE_LEASE_MS) and
+ *  a presence-only unlock ends. The explicit goodbye clears more than
+ *  that; the lapse never does. */
 export const CONTROLLER_DEVICE = "controller";
 
 export async function createLock(opts: LockOptions): Promise<LockModule> {
@@ -167,14 +171,12 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
     expiryTimer = setTimeout(() => {
       expiryTimer = undefined;
       const wasUnlocked = Object.keys(leases).length > 0;
-      const alive = pruneLeases(leases, now());
-      // A LAPSED controller lease is the controller leaving (missed goodbye, sleep, gone
-      // altogether): everything re-locks, the kiosk PIN lease included —
-      // presence is the standing ticket, the PIN a temporary one. A lapsed
-      // kiosk lease alone only prunes itself.
-      const controllerLapsed =
-        leases[CONTROLLER_DEVICE] !== undefined && alive[CONTROLLER_DEVICE] === undefined;
-      leases = controllerLapsed ? {} : alive;
+      // A lapsed lease prunes only itself, the controller's included: a
+      // goodbye lost to sleep/network costs at most the presence-driven
+      // unlock, never a kiosk PIN lease's remaining time. Clearing the
+      // whole table is the explicit goodbye's job (setPresence), not the
+      // expiry timer's.
+      leases = pruneLeases(leases, now());
       if (wasUnlocked && Object.keys(leases).length === 0) {
         void persist();
         for (const cb of listeners) cb(true);

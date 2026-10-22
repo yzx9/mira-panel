@@ -1,11 +1,12 @@
 # Development environment for the mira-panel monorepo.
 # Enter with direnv (`use flake` in .envrc) or `nix develop`.
 #
-# darwinModules.panelCompanion: importable nix-darwin module that runs the
-# receive-only macOS notifier (packages/companion) as the logged-in user's
-# launchd agent. The companion is dependency-free JavaScript (Node >= 22's
-# global WebSocket), so the module runs the source file straight off the
-# flake store path — no node_modules, no bundling step.
+# darwinModules.panelCompanion / homeManagerModules.panelCompanion: the
+# receive-only macOS notifier (packages/companion) as a logged-in user's
+# launchd agent — system-level or home-manager-level, same options. The
+# companion is dependency-free JavaScript (Node >= 22's global WebSocket),
+# so both modules run the source file straight off the flake store path —
+# no node_modules, no bundling step.
 {
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -13,6 +14,74 @@
     { self, nixpkgs }:
     let
       forAll = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
+
+      # The screen-state helper, compiled from source at build time. Shared
+      # by both companion modules; only touched when presence is enabled, so
+      # a swiftc/toolchain hiccup cannot block the plain notifier.
+      screenWatchFor =
+        pkgs:
+        pkgs.runCommand "mira-screen-watch"
+          {
+            # clang: the swift wrapper's setup hook expects NIX_CC, which only
+            # a cc-wrapper's hook defines — runCommand's stdenvNoCC has none
+            # (caught by the first real darwin build).
+            nativeBuildInputs = [
+              pkgs.swift
+              pkgs.clang
+            ];
+          }
+          ''
+            swiftc ${self}/packages/companion/src/screen-watch.swift -o $out
+          '';
+
+      # Option surface shared verbatim by both companion modules.
+      panelCompanionOptions =
+        lib:
+        let
+          inherit (lib) mkEnableOption mkOption types;
+        in
+        {
+          services.mira-panel-companion = {
+            enable = mkEnableOption "the Mira panel companion notifier";
+
+            panelUrl = mkOption {
+              type = types.str;
+              example = "ws://192.0.2.10:15932/ws";
+              description = "WebSocket URL of the panel this device watches.";
+            };
+
+            enablePresence = mkOption {
+              type = types.bool;
+              default = false;
+              description = ''
+                Drive the panel's controller presence lease from this device's screen
+                lock state (screen unlocked = panel may auto-unlock). Needs
+                controllerKeyFile and a matching PANEL_CONTROLLER_KEY on the panel.
+              '';
+            };
+
+            controllerKeyFile = mkOption {
+              type = types.str;
+              default = "";
+              example = "/Users/you/.config/mira-panel/controller.key";
+              description = ''
+                Absolute path of the one-line device key file. A string, NOT
+                a path: types.path would copy the secret into the nix store.
+              '';
+            };
+          };
+        };
+
+      # Presence env vars, shared by both companion modules.
+      presenceEnvFor =
+        lib: cfg: screenWatch:
+        lib.optionalAttrs (cfg.enablePresence && cfg.controllerKeyFile != "") {
+          PANEL_SCREEN_HELPER = "${screenWatch}";
+          # The KEY lives in this file (agenix/gopass-managed, chmod 600);
+          # a plain string on purpose — a path would copy it into the
+          # world-readable nix store.
+          PANEL_CONTROLLER_KEY_FILE = cfg.controllerKeyFile;
+        };
     in
     {
       devShells = forAll (
@@ -43,71 +112,61 @@
         }:
         let
           cfg = config.services.mira-panel-companion;
-          # The screen-state helper, compiled from source at build time. Only
-          # touched when presence is enabled, so a swiftc/toolchain hiccup
-          # cannot block the plain notifier.
-          screenWatch = pkgs.runCommand "mira-screen-watch" {
-            # clang: the swift wrapper's setup hook expects NIX_CC, which only
-            # a cc-wrapper's hook defines — runCommand's stdenvNoCC has none
-            # (caught by the first real darwin build).
-            nativeBuildInputs = [ pkgs.swift pkgs.clang ];
-          } ''
-            swiftc ${self}/packages/companion/src/screen-watch.swift -o $out
-          '';
-          presenceEnv =
-            lib.optionalAttrs (cfg.enablePresence && cfg.controllerKeyFile != "") {
-              PANEL_SCREEN_HELPER = "${screenWatch}";
-              # The KEY lives in this file (agens/gopass-managed, chmod 600);
-              # types.str on purpose — types.path would copy it into the
-              # world-readable nix store.
-              PANEL_CONTROLLER_KEY_FILE = cfg.controllerKeyFile;
-            };
+          screenWatch = screenWatchFor pkgs;
         in
         {
-          options.services.mira-panel-companion = {
-            enable = lib.mkEnableOption "the Mira panel companion notifier";
-
-            panelUrl = lib.mkOption {
-              type = lib.types.str;
-              example = "ws://192.0.2.10:15932/ws";
-              description = "WebSocket URL of the panel this device watches.";
-            };
-
-            enablePresence = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = ''
-                Drive the panel's controller presence lease from this device's screen
-                lock state (screen unlocked = panel may auto-unlock). Needs
-                controllerKeyFile and a matching PANEL_CONTROLLER_KEY on the panel.
-              '';
-            };
-
-            controllerKeyFile = lib.mkOption {
-              type = lib.types.str;
-              default = "";
-              example = "/Users/you/.config/mira-panel/controller.key";
-              description = ''
-                Absolute path of the one-line device key file. A string, NOT
-                a path: types.path would copy the secret into the nix store.
-              '';
-            };
-          };
+          options = panelCompanionOptions lib;
 
           config = lib.mkIf cfg.enable {
             # A user agent, not a daemon: osascript notifications (and the
             # screen-state distributed notifications) belong to a GUI login
             # session. RunAtLoad + KeepAlive = always-on watcher.
             launchd.user.agents.mira-panel-companion = {
-              command = "${
-                lib.getExe pkgs.nodejs_24
-              } ${self}/packages/companion/src/companion.ts";
+              command = "${lib.getExe pkgs.nodejs_24} ${self}/packages/companion/src/companion.ts";
               serviceConfig = {
                 RunAtLoad = true;
                 KeepAlive = true;
                 EnvironmentVariables = {
                   PANEL_URL = cfg.panelUrl;
-                } // presenceEnv;
+                }
+                // presenceEnvFor lib cfg screenWatch;
+              };
+            };
+          };
+        };
+
+      homeManagerModules.panelCompanion =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        let
+          cfg = config.services.mira-panel-companion;
+          screenWatch = screenWatchFor pkgs;
+        in
+        {
+          options = panelCompanionOptions lib;
+
+          # Same agent, same GUI-session reasoning as the darwin module —
+          # but managed by home-manager, so the secret can be provisioned at
+          # the home level (user-owned agenix files, no owner gymnastics).
+          # Inert on Linux homes: there is no launchd to talk to.
+          config = lib.mkIf (cfg.enable && pkgs.stdenv.hostPlatform.isDarwin) {
+            launchd.agents.mira-panel-companion = {
+              enable = true;
+              config = {
+                ProgramArguments = [
+                  (lib.getExe pkgs.nodejs_24)
+                  "${self}/packages/companion/src/companion.ts"
+                ];
+                RunAtLoad = true;
+                KeepAlive = true;
+                EnvironmentVariables = {
+                  PANEL_URL = cfg.panelUrl;
+                }
+                // presenceEnvFor lib cfg screenWatch;
               };
             };
           };

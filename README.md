@@ -326,10 +326,11 @@ screen helper（按行输出 `locked`/`unlocked`，`screen-watch.swift` 是 macO
 * 密钥从 `controllerKeyFile` 指定的**单行文件**每次请求现读（设备侧 agenix/gopass 管理，当前是你的 Mac，
   launchd 不展开 `~`）；key 不符（403）只影响 presence，通知照常
 
-在本仓库 flake 里已带 nix-darwin 模块，Mac 侧 nix 配置里：
+本仓库 flake 带两个等价模块（同一组选项，两边都生成 GUI 会话的 launchd 用户级
+agent）——系统层的 nix-darwin 模块，或家庭目录层的 home-manager 模块：
 
 ```nix
-imports = [ mira-panel.darwinModules.panelCompanion ];
+imports = [ mira-panel.darwinModules.panelCompanion ];      # 或 homeManagerModules.panelCompanion
 services.mira-panel-companion = {
   enable = true;
   panelUrl = "ws://<面板主机>:15932/ws";
@@ -341,7 +342,10 @@ services.mira-panel-companion = {
 
 （launchd 用户级 agent：通知与屏幕分布式通知都依赖 GUI 登录会话；脚本直接从 flake
 store 路径运行，无需 node_modules。`controllerKeyFile` 刻意是 `types.str` 而非
-`types.path`——后者会把密钥拷进全局可读的 nix store。）
+`types.path`——后者会把密钥拷进全局可读的 nix store。HM 层若用 agenix 供密，注意
+其默认 `path` 内嵌 `$(getconf DARWIN_USER_TEMP_DIR)`，launchd 的
+`EnvironmentVariables` 不做 shell 替换——须显式钉一个字面路径；darwin 层的 agenix
+默认 root 属主，用户 agent 读不到——须 `owner` 设为该用户。）
 
 ## 电子纸约束（改设计时请遵守）
 

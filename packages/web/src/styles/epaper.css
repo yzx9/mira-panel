@@ -29,6 +29,16 @@ body {
   overscroll-behavior: none;
 }
 
+/* Cursor blanked while idle: index.html sets this class on <html> from load
+   and after 3s without mouse activity. The kiosk's resting mid-screen system
+   pointer is a stuck artifact on the e-paper, but a blanket cursor:none would
+   also blind desktop previews. Class on html + descendant selector outranks
+   button's cursor:pointer without !important. */
+html.hide-cursor,
+html.hide-cursor * {
+  cursor: none;
+}
+
 /* Fixed 2200x1650 design canvas, scaled to whatever viewport the kiosk really
    reports. On the Mira (2200x1650 CSS px) the factor is 1, so 1 CSS px = 1
    physical px; on a smaller or high-DPR viewport the whole panel scales down

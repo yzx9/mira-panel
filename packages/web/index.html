@@ -73,6 +73,29 @@
         );
       })();
     </script>
+    <script>
+      /* Idle cursor hide: nobody is at the cage kiosk's mouse, so the system
+   pointer just sits mid-screen and reads as a stuck artifact on the e-paper.
+   The class blanks the cursor via epaper.css (which outranks button's
+   cursor: pointer); any mouse activity reveals it again and 3s of quiet
+   re-hides it, so desktop previews keep a usable pointer. Starts hidden —
+   the kiosk never moves the mouse, so it must never show the cursor. */
+      (function () {
+        var root = document.documentElement;
+        var t = 0;
+        function hide() {
+          root.classList.add("hide-cursor");
+        }
+        ["mousemove", "mousedown", "wheel"].forEach(function (ev) {
+          window.addEventListener(ev, function () {
+            root.classList.remove("hide-cursor");
+            clearTimeout(t);
+            t = setTimeout(hide, 3000);
+          });
+        });
+        hide();
+      })();
+    </script>
     <!-- The stylesheet is a plain <link>, NOT a JS import: with JavaScript off
      the page must still be readable AND styled (SSR-first contract). Vite
      rewrites it to the hashed asset in the prod build. -->

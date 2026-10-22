@@ -66,7 +66,7 @@
 
             panelUrl = lib.mkOption {
               type = lib.types.str;
-              example = "ws://192.168.1.10:15932/ws";
+              example = "ws://192.0.2.10:15932/ws";
               description = "WebSocket URL of the panel this device watches.";
             };
 

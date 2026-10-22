@@ -28,13 +28,16 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import type { GlmRailPayload, ServerMsg, VikunjaCountsPayload } from "@mira-panel/shared";
+// Relative on purpose: the flake's launchd agent runs this file straight off
+// the store path, where no workspace node_modules exists to resolve the
+// "@mira-panel/shared" specifier (observed: ERR_MODULE_NOT_FOUND crash loop).
+import type { GlmRailPayload, ServerMsg, VikunjaCountsPayload } from "../../shared/src/index.ts";
 import {
   PRESENCE_RENEW_MS,
   RECONNECT_MAX_MS,
   RECONNECT_MIN_MS,
   WATCHDOG_MS,
-} from "@mira-panel/shared";
+} from "../../shared/src/index.ts";
 
 // Minimal ambient surface of the global WebSocket — the companion never
 // leaves the client half of the spec.

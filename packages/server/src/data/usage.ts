@@ -26,6 +26,7 @@
 
 import { execFile } from "node:child_process";
 import { readFile, realpath } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { promisify } from "node:util";
 
 import type { McpDetail, ModelUsage, ToolCall } from "@mira-panel/shared";
@@ -34,7 +35,9 @@ import { panelSecret } from "../secrets.ts";
 
 const execFileAsync = promisify(execFile);
 
-const CLAUDE_WRAPPER = "/etc/profiles/per-user/yzx9/bin/claude";
+// Per-user nix profile path — derived from the running user, never pinned
+// to one login name.
+const CLAUDE_WRAPPER = `/etc/profiles/per-user/${userInfo().username}/bin/claude`;
 const SETTINGS_RE = /\/nix\/store\/[^"'\s]*claude-code-glm-settings\.json/;
 
 const CRED_TTL_MS = 10 * 60 * 1000; // key/host rarely change

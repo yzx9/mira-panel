@@ -5,6 +5,10 @@
 // root `.env`. The token never reaches argv or a log; see the panel README's
 // security notes.
 //
+// Instance base URL: config, not code — process.env.VIKUNJA_API -> the repo
+// root `.env` (same chain). No built-in default; a missing base is this
+// source's own honest error.
+//
 // Query: the web app's own path — per project, its default LIST VIEW's task
 // list (`done = false`, sorted by `position`, the manual drag order), paged
 // 50 at a time and concatenated. Three upstream facts shape this: the
@@ -23,7 +27,6 @@ import type { VikunjaCounts } from "@mira-panel/shared";
 
 import { panelSecret } from "../secrets.ts";
 
-const API = process.env.VIKUNJA_API ?? "https://todo.example.com/api/v1";
 const PAGE_SIZE = 50; // == the instance's max_items_per_page
 const MAX_PAGES = 10; // safety valve: 500 open tasks means we stop counting
 const PROJECT_TTL_MS = 10 * 60 * 1000; // also covers the token cache
@@ -64,6 +67,20 @@ interface VikunjaTask {
 
 let tokenCache: { at: number; token: string | null } = { at: 0, token: null };
 let projectCache: { at: number; list: { id: number; title: string }[] } = { at: 0, list: [] };
+let baseCache: { at: number; base: string | null } = { at: 0, base: null };
+
+/** The instance base (…/api/v1) through the panel's store — no hardcoded
+ *  default, the honest error below fires until the knob exists. Trailing
+ *  slashes are trimmed so the .env value may carry one; cached on the same
+ *  TTL as the token (the panel re-reads .env per call, but not per page). */
+async function apiBase(): Promise<string> {
+  if (baseCache.base && Date.now() - baseCache.at < PROJECT_TTL_MS) return baseCache.base;
+  const base = (await panelSecret("VIKUNJA_API"))?.replace(/\/+$/, "");
+  if (!base || !/^https?:\/\//.test(base))
+    throw new Error("no Vikunja API base (env VIKUNJA_API or .env)");
+  baseCache = { at: Date.now(), base };
+  return base;
+}
 
 async function token(): Promise<string> {
   if (tokenCache.token && Date.now() - tokenCache.at < PROJECT_TTL_MS) return tokenCache.token;
@@ -85,7 +102,7 @@ interface ApiInit {
 }
 
 async function api(path: string, key: string, init?: ApiInit): Promise<unknown> {
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(`${await apiBase()}${path}`, {
     method: init?.method,
     body: init ? JSON.stringify(init.json) : undefined,
     headers: {

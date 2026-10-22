@@ -1,10 +1,10 @@
 # mira-panel
 
-BOOX Mira 电子纸面板（树莓派 `yzx9-pie` kiosk 的落地页），一个 **navbar + 左侧 30% tab 栏 + 右侧详情** 的应用。
+BOOX Mira 电子纸面板（树莓派 kiosk 的落地页），一个 **navbar + 左侧 30% tab 栏 + 右侧详情** 的应用。
 
-- **服务地址：** `http://192.0.2.10:15932`（本机 `yzx9-ws`，监听 `0.0.0.0:15932`）
-- **树莓派侧：** `hosts/yzx9-pie/cage.nix` 的 Firefox kiosk 直接打开上面这个 URL
-- **防火墙：** `hosts/yzx9-ws/networking.nix` 已放行 `192.0.2.0/24 → 15932`（无需改动）
+- **服务地址：** `http://<panel-host>:15932`（面板主机，监听 `0.0.0.0:15932`）
+- **树莓派侧：** `hosts/<kiosk-host>/cage.nix` 的 Firefox kiosk 直接打开上面这个 URL
+- **防火墙：** `hosts/<panel-host>/networking.nix` 已放行 `<lan-subnet> → 15932`（无需改动）
 
 ## 仓库结构（npm workspaces monorepo）
 
@@ -142,12 +142,13 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
 ### Vikunja（`/vikunja`）
 
 ```
-GET https://todo.example.com/api/v1/projects
+GET <VIKUNJA_API>/projects
 GET /api/v1/projects/{id}/tasks?filter=done = false&sort_by=position&order_by=asc&per_page=50&page=N
 ```
 
 - `Authorization: Bearer <token>`，token 由**面板自管 `.env`** 解析（`VIKUNJA_API_KEY`，
-  环境变量同名覆盖；见「安全」节的密钥管理）
+  环境变量同名覆盖；实例地址 `VIKUNJA_API` 走同一条解析链（env → `.env`），代码里
+  **没有内置默认值**；见「安全」节的密钥管理）
 - **逐项目分页拉全**：实例 `max_items_per_page = 50`，更大的 `per_page` 会被**静默钳到
   50**（go-vikunja/vikunja#2239）；且 `position` 排序**只在项目上下文可用**（全局
   `/tasks` 会 400 要求 project view id）。所以先取项目列表、再逐项目按 50/页拉到短页、

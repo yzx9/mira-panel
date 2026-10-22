@@ -9,9 +9,9 @@
 // slices a notification summary needs, nothing heavier.
 //
 // PRESENCE: when PANEL_SCREEN_HELPER (the compiled screen-watch.swift) and
-// PANEL_MAC_KEY_FILE are configured, the companion also drives the panel's
-// "mac" lease — screen unlocked -> POST /api/presence {present:true} now
-// and every MAC_RENEW_MS; screen locked -> {present:false} once, which
+// PANEL_CONTROLLER_KEY_FILE are configured, the companion also drives the panel's
+// "controller" lease — screen unlocked -> POST /api/presence {present:true} now
+// and every PRESENCE_RENEW_MS; screen locked -> {present:false} once, which
 // re-locks the panel immediately (the 5-minute lease TTL is only the
 // fallback for a goodbye lost to sleep/network). Manual kiosk locks are
 // honoured: a locked:true broadcast sets a hold that stops renewals until
@@ -29,7 +29,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import type { GlmRailPayload, ServerMsg, VikunjaCountsPayload } from "@mira-panel/shared";
-import { MAC_RENEW_MS, RECONNECT_MAX_MS, RECONNECT_MIN_MS, WATCHDOG_MS } from "@mira-panel/shared";
+import {
+  PRESENCE_RENEW_MS,
+  RECONNECT_MAX_MS,
+  RECONNECT_MIN_MS,
+  WATCHDOG_MS,
+} from "@mira-panel/shared";
 
 // Minimal ambient surface of the global WebSocket — the companion never
 // leaves the client half of the spec.
@@ -53,7 +58,7 @@ if (!url) {
 // Same origin, HTTP side: ws://host:port/ws -> http://host:port
 const httpBase = url.replace(/^ws/, "http").replace(/\/ws$/, "");
 
-const keyFile = process.env.PANEL_MAC_KEY_FILE;
+const keyFile = process.env.PANEL_CONTROLLER_KEY_FILE;
 const helperPath = process.env.PANEL_SCREEN_HELPER;
 const presenceConfigured = keyFile !== undefined && helperPath !== undefined;
 
@@ -130,7 +135,9 @@ async function presencePost(present: boolean): Promise<void> {
       // once per renewal tick.
       if (!warnedRejected) {
         warnedRejected = true;
-        process.stderr.write("[companion] PANEL_MAC_KEY mismatch — presence rejected (403)\n");
+        process.stderr.write(
+          "[companion] PANEL_CONTROLLER_KEY mismatch — presence rejected (403)\n",
+        );
       }
       return;
     }
@@ -209,7 +216,7 @@ if (presenceConfigured) {
   }
   spawnHelper();
 
-  setInterval(presenceTick, MAC_RENEW_MS);
+  setInterval(presenceTick, PRESENCE_RENEW_MS);
 }
 
 // ------------------------------------------------------------------ notifier

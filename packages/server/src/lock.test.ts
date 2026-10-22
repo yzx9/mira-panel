@@ -31,26 +31,26 @@ async function tmpFile(): Promise<string> {
 }
 
 /** A lock bound to a temp file, tiny lease/backoff, controllable PIN and
- *  Mac key. The arrays are the read sequences (one entry per read: warm +
+ *  controller key. The arrays are the read sequences (one entry per read: warm +
  *  each attempt); null entries model "not configured yet". */
 async function testLock(
   pins: (string | null)[] | null,
   leaseMs = 40,
-  mac: { key: string | null; leaseMs?: number } = { key: null },
+  presence: { key: string | null; leaseMs?: number } = { key: null },
 ): Promise<{ lock: LockModule; file: string }> {
   const file = await tmpFile();
   let reads = 0;
   const lock = await createLock({
     file,
     leaseMs,
-    macLeaseMs: mac.leaseMs ?? 30,
+    presenceLeaseMs: presence.leaseMs ?? 30,
     backoffBaseMs: 5,
     backoffResetMs: 1000,
     readPin: async () => {
       reads += 1;
       return pins ? (pins[Math.min(reads - 1, pins.length - 1)] ?? null) : null;
     },
-    readMacKey: async () => mac.key,
+    readControllerKey: async () => presence.key,
   });
   return { lock, file };
 }
@@ -188,24 +188,24 @@ test("setPresence verifies the device key: unconfigured and wrong never unlock",
   assert.equal(locked.lock.isLocked(), false);
 });
 
-test("the mac lease renews silently, expires loudly, on its own short clock", async () => {
+test("the controller lease renews silently, expires loudly, on its own short clock", async () => {
   const { lock } = await testLock(["1234"], 60_000, { key: "sekret", leaseMs: 30 });
   const events: boolean[] = [];
   lock.onChange((v) => events.push(v));
   assert.deepEqual(await lock.setPresence("sekret", true), { ok: true });
   // Wait on the EVENT, not isLocked(): timestamps go stale a tick before
   // the timer prunes + broadcasts (the timer owns transitions).
-  await waitFor(() => events.length >= 2, 2000, "mac lease expiry");
+  await waitFor(() => events.length >= 2, 2000, "a controller lease expiry");
   assert.deepEqual(events, [false, true]);
 });
 
-test("a lapsed mac lease re-locks EVERYTHING, the kiosk PIN lease included", async () => {
+test("a lapsed controller lease re-locks EVERYTHING, the kiosk PIN lease included", async () => {
   const { lock, file } = await testLock(["1234"], 60_000, { key: "sekret", leaseMs: 30 });
   await lock.unlockWithPin("1234"); // kiosk: 60s
-  await lock.setPresence("sekret", true); // mac: 30ms
+  await lock.setPresence("sekret", true); // controller: 30ms
   const events: boolean[] = [];
   lock.onChange((v) => events.push(v));
-  await waitFor(() => events.length >= 1, 2000, "mac expiry clearing all");
+  await waitFor(() => events.length >= 1, 2000, "controller expiry clearing all");
   assert.deepEqual(events, [true]);
   assert.equal(lock.isLocked(), true);
   // persist() is fire-and-forget in the timer — poll the file, don't race it.
@@ -219,11 +219,11 @@ test("a lapsed mac lease re-locks EVERYTHING, the kiosk PIN lease included", asy
   );
 });
 
-test("a lapsed kiosk lease alone leaves the mac presence untouched", async () => {
+test("a lapsed kiosk lease alone leaves the controller presence untouched", async () => {
   const { lock } = await testLock(["1234"], 30, { key: "sekret", leaseMs: 60_000 });
   await lock.unlockWithPin("1234"); // kiosk: 30ms
-  await lock.setPresence("sekret", true); // mac: an hour
-  await sleep(80); // the kiosk expiry fires; the mac lease must survive it
+  await lock.setPresence("sekret", true); // controller: an hour
+  await sleep(80); // the kiosk expiry fires; the controller lease must survive it
   assert.equal(lock.isLocked(), false);
 });
 

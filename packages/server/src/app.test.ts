@@ -34,7 +34,7 @@ const stubHub = {
 
 async function testApp(
   pins: string[] | null,
-  macKey: string | null = null,
+  controllerKey: string | null = null,
 ): Promise<{
   app: ReturnType<typeof createApp>;
   lock: LockModule;
@@ -46,7 +46,7 @@ async function testApp(
     leaseMs: 60_000,
     backoffBaseMs: 1,
     readPin: async () => (pins ? (pins[0] ?? null) : null),
-    readMacKey: async () => macKey,
+    readControllerKey: async () => controllerKey,
   });
   // Echo stub: the page handler's arguments are the assertion surface.
   let rendered: { tab: string; locked: boolean; pinConfigured: boolean } | null = null;

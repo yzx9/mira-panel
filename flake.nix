@@ -52,12 +52,12 @@
             swiftc ${self}/packages/companion/src/screen-watch.swift -o $out
           '';
           presenceEnv =
-            lib.optionalAttrs (cfg.enablePresence && cfg.macKeyFile != "") {
+            lib.optionalAttrs (cfg.enablePresence && cfg.controllerKeyFile != "") {
               PANEL_SCREEN_HELPER = "${screenWatch}";
               # The KEY lives in this file (agens/gopass-managed, chmod 600);
               # types.str on purpose — types.path would copy it into the
               # world-readable nix store.
-              PANEL_MAC_KEY_FILE = cfg.macKeyFile;
+              PANEL_CONTROLLER_KEY_FILE = cfg.controllerKeyFile;
             };
         in
         {
@@ -67,23 +67,23 @@
             panelUrl = lib.mkOption {
               type = lib.types.str;
               example = "ws://192.168.1.10:15932/ws";
-              description = "WebSocket URL of the panel this Mac watches.";
+              description = "WebSocket URL of the panel this device watches.";
             };
 
             enablePresence = lib.mkOption {
               type = lib.types.bool;
               default = false;
               description = ''
-                Drive the panel's mac presence lease from this Mac's screen
+                Drive the panel's controller presence lease from this device's screen
                 lock state (screen unlocked = panel may auto-unlock). Needs
-                macKeyFile and a matching PANEL_MAC_KEY on the panel.
+                controllerKeyFile and a matching PANEL_CONTROLLER_KEY on the panel.
               '';
             };
 
-            macKeyFile = lib.mkOption {
+            controllerKeyFile = lib.mkOption {
               type = lib.types.str;
               default = "";
-              example = "/Users/you/.config/mira-panel/mac.key";
+              example = "/Users/you/.config/mira-panel/controller.key";
               description = ''
                 Absolute path of the one-line device key file. A string, NOT
                 a path: types.path would copy the secret into the nix store.

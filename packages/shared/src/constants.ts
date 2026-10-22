@@ -32,12 +32,12 @@ export const LIST_PAGE_ROWS = 14;
 export const LOCK_LEASE_MS = 30 * 60_000;
 
 // Mac presence lease: while the Mac's screen is unlocked the companion
-// renews the "mac" lease every MAC_RENEW_MS; the screen locking (or the
+// renews the "mac" lease every PRESENCE_RENEW_MS; the screen locking (or the
 // Mac vanishing) stops the renewals, so the panel re-locks within
-// MAC_LEASE_MS of the last renewal even if the explicit goodbye POST is
+// PRESENCE_LEASE_MS of the last renewal even if the explicit goodbye POST is
 // lost. Two missed renewals drop the lease; one missed renewal survives.
-export const MAC_LEASE_MS = 5 * 60_000;
-export const MAC_RENEW_MS = 2 * 60_000;
+export const PRESENCE_LEASE_MS = 5 * 60_000;
+export const PRESENCE_RENEW_MS = 2 * 60_000;
 
 // PIN throttle: a wrong PIN is answered after min(base * 2^(n-1), max)
 // where n is the consecutive-failure count; success — or this long without

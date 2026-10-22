@@ -98,19 +98,19 @@ README，出现在电子纸上就是噪声。
 
 ### 路由
 
-| 路径                          | 作用                                                                                                                                                                                                       |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页，bootstrap 只嵌 rail 所需的瘦切片）                                                                                                                                                      |
-| `/glm`                        | GLM 面板（SSR，bootstrap 含 quota/usage/deepseek/tavily）                                                                                                                                                  |
-| `/vikunja`                    | Vikunja 面板（SSR，bootstrap 含全量任务桶）                                                                                                                                                                |
-| `/ws`                         | **稳态数据通道**（WebSocket，见「刷新契约」）：页面声明当前 tab 的 topic，hub 按各源自有节奏推送；锁/解锁转移也在这条通道广播                                                                              |
-| `/api/raw`                    | hub 里每个源的缓存状态（ok/stale/error/原始 payload）+ 客户端视口（调试用）                                                                                                                                |
-| `/api/vikunja/tasks/:id/done` | 写路径（POST）：勾选完成一个任务。要求 `X-Panel-Write: 1` 头，锁定态 403，返回刷新后的 vikunja 视图模型                                                                                                    |
-| `/api/lock`                   | 写路径（POST）：锁定面板（清空全部租约）。要求 `X-Panel-Write: 1` 头                                                                                                                                       |
-| `/api/unlock`                 | 写路径（POST）：`{"pin":"…"}` 校验通过后签发 30 分钟解锁租约。要求 `X-Panel-Write: 1` 头；错 PIN 403（连败指数退避）、未配置 503                                                                           |
-| `/api/presence`               | 写路径（POST）：Mac 在场声明 `{"key":…,"present":…}`。`present:true` 续 5 分钟 mac 租约（屏幕解锁期间每 2 分钟一次），`present:false` 立即清空全部租约。要求 `X-Panel-Write: 1` 头；错 key 403、未配置 503 |
-| `/healthz`                    | `ok`                                                                                                                                                                                                       |
-| `/<file>`                     | 静态文件（`packages/server/public/` 与 web 构建产物）                                                                                                                                                      |
+| 路径                          | 作用                                                                                                                                                                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页，bootstrap 只嵌 rail 所需的瘦切片）                                                                                                                                                                              |
+| `/glm`                        | GLM 面板（SSR，bootstrap 含 quota/usage/deepseek/tavily）                                                                                                                                                                          |
+| `/vikunja`                    | Vikunja 面板（SSR，bootstrap 含全量任务桶）                                                                                                                                                                                        |
+| `/ws`                         | **稳态数据通道**（WebSocket，见「刷新契约」）：页面声明当前 tab 的 topic，hub 按各源自有节奏推送；锁/解锁转移也在这条通道广播                                                                                                      |
+| `/api/raw`                    | hub 里每个源的缓存状态（ok/stale/error/原始 payload）+ 客户端视口（调试用）                                                                                                                                                        |
+| `/api/vikunja/tasks/:id/done` | 写路径（POST）：勾选完成一个任务。要求 `X-Panel-Write: 1` 头，锁定态 403，返回刷新后的 vikunja 视图模型                                                                                                                            |
+| `/api/lock`                   | 写路径（POST）：锁定面板（清空全部租约）。要求 `X-Panel-Write: 1` 头                                                                                                                                                               |
+| `/api/unlock`                 | 写路径（POST）：`{"pin":"…"}` 校验通过后签发 30 分钟解锁租约。要求 `X-Panel-Write: 1` 头；错 PIN 403（连败指数退避）、未配置 503                                                                                                   |
+| `/api/presence`               | 写路径（POST）：主控设备在场声明 `{"key":…,"present":…}`。`present:true` 续 5 分钟主控租约（设备 "controller"）（屏幕解锁期间每 2 分钟一次），`present:false` 立即清空全部租约。要求 `X-Panel-Write: 1` 头；错 key 403、未配置 503 |
+| `/healthz`                    | `ok`                                                                                                                                                                                                                               |
+| `/<file>`                     | 静态文件（`packages/server/public/` 与 web 构建产物）                                                                                                                                                                              |
 
 `/api/state`（及 `/api/usage` 别名）已随 60 秒轮询一起退役：稳态数据全部走 `/ws` 推送。
 
@@ -279,14 +279,14 @@ GET https://api.tavily.com/usage
   快照起步，新鲜数据随后按 floor 节奏到达——**永不为数据等解锁**
 - **自动回锁**：租约到期无人续 → 静默回锁并广播（无倒计时，电纸少刷一次）；数据页
   的 kiosk 整页跳回时钟，并经 `localStorage` 记住锁定前所在 tab，解锁后自动跳回
-- **远程转移即时生效**：锁/解锁的每次转移在 `/ws` 广播；Mac companion、其他浏览器
+- **远程转移即时生效**：锁/解锁的每次转移在 `/ws` 广播；主控设备 companion、其他浏览器
   都在同一时刻对齐（重连则由 `hello.locked` 补齐电平）
-- **Mac 在场租约**（`POST /api/presence`，`{"key":…,"present":…}`）：设备 `"mac"` 的
-  **5 分钟租约**（`MAC_LEASE_MS`），Mac 屏幕解锁即签/续（companion 每
-  `MAC_RENEW_MS`=2 分钟一续，解锁事件即时发不等周期）；屏幕锁定 → companion 发
+- **主控设备在场租约**（`POST /api/presence`，`{"key":…,"present":…}`）：主控设备（`"controller"`）的
+  **5 分钟租约**（`PRESENCE_LEASE_MS`），设备屏幕解锁即签/续（companion 每
+  `PRESENCE_RENEW_MS`=2 分钟一续，解锁事件即时发不等周期）；屏幕锁定 → companion 发
   `present:false` **立即清空全部租约**（kiosk 的 PIN 租约一并作废——在场是常态票、
   PIN 是临时票）；`present:false` 丢失（合盖/睡眠/断网）由 5 分钟 TTL 兜底，
-  **mac 租约超时同样整表清空**。key 为 `PANEL_MAC_KEY` 明文比对（长随机钥即防线，
+  **主控租约超时同样整表清空**。key 为 `PANEL_CONTROLLER_KEY` 明文比对（长随机钥即防线，
   无退避梯），每次请求现读。kiosk 手动锁定后 companion 会听到 `locked:true`
   广播并**暂停续租**，直到屏幕下次解锁——否则下一个续租 tick 会悄悄翻掉锁定按钮
 - **PIN**：4 位，存**面板自管 `.env`** 的 `PANEL_PIN=…`（环境变量同名优先；每次尝试
@@ -303,23 +303,27 @@ GET https://api.tavily.com/usage
   验证方（服务器即锁）拓扑下它们没有买主，接缝留在 `lock.ts` 的
   `authorize → Lease` 一个函数后面
 
-### Mac companion（通知器 + 在场传感器）
+### 主控设备 companion（通知器 + 在场传感器）
 
 `packages/companion`——零 npm 依赖的 Node 脚本（Node ≥ 22 的全局 WebSocket），常驻
 连接面板 `/ws`：收 `locked:true` 弹「面板已锁定」，收 `locked:false` 弹
 「面板已解锁（GLM 5h 池 N% · 今日待办 N 项）」（摘要来自缓存更新，尽力而为、
 不强绑）。断线退避重连 + 看门狗，与面板页同契约。
 
-配置 `enablePresence` 后它同时是**在场传感器**：
+配置 `enablePresence` 后它同时是**在场传感器**。"主控设备"是一个**角色**而非某台
+机器——当前由你的 Mac 承担，将来迁到别的设备只需两件事：该设备跑一个同协议的
+screen helper（按行输出 `locked`/`unlocked`，`screen-watch.swift` 是 macOS 实现）
 
-- `screen-watch.swift`（~20 行，flake 在 Mac 上用 swiftc 编译）监听
+- 同值的 `PANEL_CONTROLLER_KEY` 密钥文件；服务端与 companion 主体零改动：
+
+* `screen-watch.swift`（~20 行，flake 在 Mac 上用 swiftc 编译）监听
   `com.apple.screenIsLocked/Unlocked` 分布式通知，按行输出当前态；首行是启动时的
   最佳已知状态（`CGSessionCopyCurrentDictionary`，查询失败保持沉默 → companion 按
   锁定处理，fail-safe）
-- companion 拉起 helper 按行读 stdout：`unlocked` → 立即 `present:true` + 每 2 分钟
+* companion 拉起 helper 按行读 stdout：`unlocked` → 立即 `present:true` + 每 2 分钟
   续；`locked` → `present:false`；helper 崩溃按 1s→60s 翻倍重生，**无法启动则 presence
   自动关闭**，退化为纯通知器（不破坏现有功能）
-- 密钥从 `macKeyFile` 指定的**单行文件**每次请求现读（Mac 侧 agenix/gopass 管理，
+* 密钥从 `controllerKeyFile` 指定的**单行文件**每次请求现读（设备侧 agenix/gopass 管理，当前是你的 Mac，
   launchd 不展开 `~`）；key 不符（403）只影响 presence，通知照常
 
 在本仓库 flake 里已带 nix-darwin 模块，Mac 侧 nix 配置里：
@@ -331,12 +335,12 @@ services.mira-panel-companion = {
   panelUrl = "ws://<面板主机>:15932/ws";
   # 在场自动解锁（可选）：
   enablePresence = true;
-  macKeyFile = "/Users/<你>/.config/mira-panel/mac.key";  # 单行密钥，chmod 600
+  controllerKeyFile = "/Users/<你>/.config/mira-panel/controller.key";  # 单行密钥，chmod 600
 };
 ```
 
 （launchd 用户级 agent：通知与屏幕分布式通知都依赖 GUI 登录会话；脚本直接从 flake
-store 路径运行，无需 node_modules。`macKeyFile` 刻意是 `types.str` 而非
+store 路径运行，无需 node_modules。`controllerKeyFile` 刻意是 `types.str` 而非
 `types.path`——后者会把密钥拷进全局可读的 nix store。）
 
 ## 电子纸约束（改设计时请遵守）
@@ -419,7 +423,7 @@ curl 三态即可）。
 `restart-service.sh` 会从 worktree 指针解析出主 checkout，把主 `.env` 的路径经
 `PANEL_ENV_FILE` 显式传给预览服务——密钥原地不动，业务代码不感知 worktree。
 
-- 收录的键：`PANEL_PIN`、`PANEL_MAC_KEY`（Mac 在场设备钥，可选）、`VIKUNJA_API_KEY`、
+- 收录的键：`PANEL_PIN`、`PANEL_CONTROLLER_KEY`（主控设备钥，可选）、`VIKUNJA_API_KEY`、
   `DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、
   代理 `HTTPS_PROXY`/`ALL_PROXY`，以及可选的 GLM 对（`GLM_API_KEY` + `GLM_BASE_URL`）
 - GLM 对未配置时回退旧的 nix 生成链（`claude` wrapper → settings JSON →
@@ -431,7 +435,7 @@ curl 三态即可）。
 
 ### 信任层级
 
-- **面板无鉴权，有四条写路径**（勾选完成、锁定、PIN 解锁、Mac 在场声明）：局域网内
+- **面板无鉴权，有四条写路径**（勾选完成、锁定、PIN 解锁、主控设备在场声明）：局域网内
   任何设备都能勾掉任务或锁定面板——与锁定机制的信任层级一致（家用可接受）。
   `X-Panel-Write: 1` 自定义头迫使跨站写入先走 CORS 预检，而本服务永不
   应答预检，跨站表单/fetch 因此写不进来；解锁路径额外由 PIN + 连败指数退避把守，
@@ -444,12 +448,12 @@ curl 三态即可）。
 - [x] WebSocket 声明式订阅改造（hub 统一节奏/缓存/投影，`/api/state` 轮询退役，
       2026-10 已落地）
 - [x] 锁定改为**服务端租约 + PIN 解锁**（cookie 君子协定退役；WS 广播锁转移、
-      上游 floor、Mac companion 通知器，2026-10 已落地）
-- [ ] Mac companion 的**远程控制**（`companion lock` / `unlock <pin>` 子命令——
+      上游 floor、主控设备 companion 通知器，2026-10 已落地）
+- [ ] 主控设备 companion 的**远程控制**（`companion lock` / `unlock <pin>` 子命令——
       路由已就绪，加个 CLI 即可）
-- [x] Mac companion 的**在场自动解锁**：`/api/presence` + `screen-watch.swift`
+- [x] 主控设备 companion 的**在场自动解锁**：`/api/presence` + `screen-watch.swift`
       （屏幕事件驱动的 5 分钟可续租约，离场清全部租约；`enablePresence` +
-      `macKeyFile` 模块选项；2026-10 已落地——Mac 侧 swiftc 编译与真实屏幕事件
+      `controllerKeyFile` 模块选项；2026-10 已落地——设备侧 swiftc 编译与真实屏幕事件
       的首验仍待上机）
 - [ ] 持久化：**已决定先保持现状**（Hermes 后台拉起的进程；gateway 重启后需手动重启）
 - [ ] 还能接哪些数据源（Readeck / FreshRSS / HN）

@@ -47,7 +47,10 @@
           # touched when presence is enabled, so a swiftc/toolchain hiccup
           # cannot block the plain notifier.
           screenWatch = pkgs.runCommand "mira-screen-watch" {
-            nativeBuildInputs = [ pkgs.swift ];
+            # clang: the swift wrapper's setup hook expects NIX_CC, which only
+            # a cc-wrapper's hook defines — runCommand's stdenvNoCC has none
+            # (caught by the first real darwin build).
+            nativeBuildInputs = [ pkgs.swift pkgs.clang ];
           } ''
             swiftc ${self}/packages/companion/src/screen-watch.swift -o $out
           '';

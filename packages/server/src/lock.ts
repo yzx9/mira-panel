@@ -10,17 +10,20 @@
 // runtime dir, which re-locks the panel — that is the deliberate cold-boot
 // safety property (and the last-resort escape hatch when a PIN is lost).
 //
-// Crypto: none beyond a plain comparison. The PIN is a 4-digit home-panel
+// Crypto: none beyond plain comparisons. The PIN is a 4-digit home-panel
 // secret resolved at runtime from the panel's own store (env -> repo-root
 // `.env`, see secrets.ts — never in code); the real brute-force defence is
-// the exponential failure ladder below, since the keyspace is 10^4. See
-// README's lock section for the trust level.
+// the exponential failure ladder below, since the keyspace is 10^4. The
+// Mac's device key (PANEL_MAC_KEY) is long random — the keyspace IS the
+// defence, so it compares plainly with no ladder. See README's lock
+// section for the trust level.
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import {
   LOCK_LEASE_MS,
+  MAC_LEASE_MS,
   PIN_BACKOFF_BASE_MS,
   PIN_BACKOFF_MAX_MS,
   PIN_BACKOFF_RESET_MS,
@@ -47,6 +50,8 @@ export function pruneLeases(leases: Record<string, number>, now: number): Record
 
 export type UnlockResult = { ok: true } | { ok: false; configured: boolean };
 
+export type PresenceResult = { ok: true } | { ok: false; reason: "wrong" | "unconfigured" };
+
 /** The surface the hub consumes (cadence + transition broadcast). */
 export interface LockView {
   isLocked(): boolean;
@@ -60,6 +65,11 @@ export interface LockModule extends LockView {
   lockAll(): Promise<void>;
   /** Throttled PIN verification; issues the standard lease on success. */
   unlockWithPin(pin: string): Promise<UnlockResult>;
+  /** Mac presence: verified against PANEL_MAC_KEY (fresh read per call).
+   *  present:true issues/renews the short mac lease; present:false is the
+   *  Mac leaving — it clears EVERY lease, the kiosk PIN lease included
+   *  (presence is the standing ticket, the PIN a temporary one). */
+  setPresence(key: string, present: boolean): Promise<PresenceResult>;
   /** Re-read the PIN file once; boot awaits it to warm the cache. */
   warm(): Promise<void>;
 }
@@ -68,10 +78,14 @@ export interface LockOptions {
   /** Lease table file. Persistence is best-effort: failures degrade to
    *  memory-only with a single stderr note, never a crash. */
   file: string;
-  /** Lease duration; defaults to LOCK_LEASE_MS (injectable for tests). */
+  /** Kiosk lease duration; defaults to LOCK_LEASE_MS (injectable for tests). */
   leaseMs?: number;
+  /** Mac presence lease duration; defaults to MAC_LEASE_MS. */
+  macLeaseMs?: number;
   /** Resolves the configured PIN; null = not configured. */
   readPin?: () => Promise<string | null>;
+  /** Resolves the Mac device key; null = presence disabled. */
+  readMacKey?: () => Promise<string | null>;
   /** Backoff ladder overrides for tests. */
   backoffBaseMs?: number;
   backoffResetMs?: number;
@@ -83,16 +97,18 @@ interface PersistedShape {
   leases: Record<string, number>;
 }
 
-/** The only lease issuer this phase: a human PIN typed at the kiosk. The
- *  device key stays a dimension of the table so a future companion's
- *  renewable 5-minute lease drops in without a reshape. */
 const KIOSK_DEVICE = "kiosk";
+/** The Mac presence companion's lease; short-lived by design — the screen
+ *  locking stops its renewals and the panel re-locks (MAC_LEASE_MS). */
+export const MAC_DEVICE = "mac";
 
 export async function createLock(opts: LockOptions): Promise<LockModule> {
   const file = opts.file;
   const leaseMs = opts.leaseMs ?? LOCK_LEASE_MS;
+  const macLeaseMs = opts.macLeaseMs ?? MAC_LEASE_MS;
   const now = opts.now ?? Date.now;
   const readPin = opts.readPin ?? (async () => panelSecret("PANEL_PIN"));
+  const readMacKey = opts.readMacKey ?? (async () => panelSecret("PANEL_MAC_KEY"));
   const backoffBase = opts.backoffBaseMs ?? PIN_BACKOFF_BASE_MS;
   const backoffReset = opts.backoffResetMs ?? PIN_BACKOFF_RESET_MS;
 
@@ -150,7 +166,13 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
     expiryTimer = setTimeout(() => {
       expiryTimer = undefined;
       const wasUnlocked = Object.keys(leases).length > 0;
-      leases = pruneLeases(leases, now());
+      const alive = pruneLeases(leases, now());
+      // A LAPSED mac lease is the Mac leaving (missed goodbye, sleep, gone
+      // altogether): everything re-locks, the kiosk PIN lease included —
+      // presence is the standing ticket, the PIN a temporary one. A lapsed
+      // kiosk lease alone only prunes itself.
+      const macLapsed = leases[MAC_DEVICE] !== undefined && alive[MAC_DEVICE] === undefined;
+      leases = macLapsed ? {} : alive;
       if (wasUnlocked && Object.keys(leases).length === 0) {
         void persist();
         for (const cb of listeners) cb(true);
@@ -161,9 +183,18 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
     expiryTimer.unref?.();
   }
 
-  function issueLease(device: string): void {
-    leases = { ...leases, [device]: now() + leaseMs };
+  function issueLease(device: string, ms: number): void {
+    leases = { ...leases, [device]: now() + ms };
     armExpiry();
+  }
+
+  /** Shared issuer tail: persist, then announce the locked->unlocked edge
+   *  exactly once (renewals of a live lease stay silent). */
+  async function issueAndNotify(device: string, ms: number): Promise<void> {
+    const wasLocked = isLocked();
+    issueLease(device, ms);
+    await persist();
+    if (wasLocked) for (const cb of listeners) cb(false);
   }
 
   function lockAll(): Promise<void> {
@@ -190,10 +221,21 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
       return { ok: false, configured };
     }
     failures = 0;
-    const wasLocked = isLocked();
-    issueLease(KIOSK_DEVICE);
-    await persist();
-    if (wasLocked) for (const cb of listeners) cb(false);
+    await issueAndNotify(KIOSK_DEVICE, leaseMs);
+    return { ok: true };
+  }
+
+  async function setPresence(key: string, present: boolean): Promise<PresenceResult> {
+    // Fresh read per call, like the PIN: provisioning/rotating the key in
+    // .env takes effect on the next presence POST, no restart.
+    const expected = await readMacKey();
+    if (expected === null) return { ok: false, reason: "unconfigured" };
+    if (key !== expected) return { ok: false, reason: "wrong" };
+    if (!present) {
+      await lockAll(); // the Mac leaving re-locks everything
+      return { ok: true };
+    }
+    await issueAndNotify(MAC_DEVICE, macLeaseMs);
     return { ok: true };
   }
 
@@ -210,6 +252,7 @@ export async function createLock(opts: LockOptions): Promise<LockModule> {
     pinConfigured: () => pinCache !== null,
     lockAll,
     unlockWithPin,
+    setPresence,
     warm,
     onChange(cb) {
       listeners.add(cb);

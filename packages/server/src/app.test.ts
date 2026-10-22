@@ -32,7 +32,10 @@ const stubHub = {
   attach: () => ({ message: () => undefined, close: () => undefined }),
 } as unknown as Hub;
 
-async function testApp(pins: string[] | null): Promise<{
+async function testApp(
+  pins: string[] | null,
+  macKey: string | null = null,
+): Promise<{
   app: ReturnType<typeof createApp>;
   lock: LockModule;
   rendered: () => { tab: string; locked: boolean; pinConfigured: boolean } | null;
@@ -43,6 +46,7 @@ async function testApp(pins: string[] | null): Promise<{
     leaseMs: 60_000,
     backoffBaseMs: 1,
     readPin: async () => (pins ? (pins[0] ?? null) : null),
+    readMacKey: async () => macKey,
   });
   // Echo stub: the page handler's arguments are the assertion surface.
   let rendered: { tab: string; locked: boolean; pinConfigured: boolean } | null = null;
@@ -132,4 +136,40 @@ test("the page handler passes lock state and pinConfigured to SSR", async () => 
   );
   assert.equal((await app.request("/glm")).status, 200);
   assert.deepEqual(rendered(), { tab: "glm", locked: false, pinConfigured: true });
+});
+
+test("the presence route maps key outcomes to 400/403/503/200 and unlocks", async () => {
+  const { app } = await testApp(["1234"], "sekret");
+  const post = (body: string, withHeader = true) =>
+    app.request("/api/presence", {
+      method: "POST",
+      headers: withHeader ? WRITE : { "Content-Type": "application/json" },
+      body,
+    });
+
+  assert.equal((await post('{"key":"k","present":true}', false)).status, 400); // header first
+  assert.equal((await post("nope")).status, 400); // bad JSON
+  assert.equal((await post('{"key":"k"}')).status, 400); // missing present
+  assert.equal((await post('{"key":"nope","present":true}')).status, 403); // wrong key
+
+  const unconfigured = await testApp(["1234"], null);
+  assert.equal(
+    (
+      await unconfigured.app.request("/api/presence", {
+        method: "POST",
+        headers: WRITE,
+        body: '{"key":"k","present":true}',
+      })
+    ).status,
+    503,
+  );
+
+  // Right key, present:true -> unlocked (the redirect proves it).
+  assert.equal((await post('{"key":"sekret","present":true}')).status, 200);
+  assert.equal((await app.request("/glm")).status, 200);
+
+  // present:false is the goodbye: everything re-locks, PIN leases included.
+  await app.request("/api/unlock", { method: "POST", headers: WRITE, body: '{"pin":"1234"}' });
+  assert.equal((await post('{"key":"sekret","present":false}')).status, 200);
+  assert.equal((await app.request("/glm")).status, 302);
 });

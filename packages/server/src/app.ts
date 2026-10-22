@@ -123,6 +123,27 @@ export function createApp(deps: AppDeps): Hono {
     );
   });
 
+  // Mac presence: renew (present:true) or say goodbye (present:false — the
+  // Mac's screen locked). Deliberately NOT gated by the locked-403: this IS
+  // an unlock channel; the long random device key is the whole gate.
+  app.post("/api/presence", async (c) => {
+    if (c.req.header("X-Panel-Write") !== "1") return c.text("Missing X-Panel-Write header", 400);
+    let body: { key?: unknown; present?: unknown };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.text("Bad JSON body", 400);
+    }
+    if (typeof body.key !== "string" || typeof body.present !== "boolean")
+      return c.text("Bad body", 400);
+    const result = await deps.lock.setPresence(body.key, body.present);
+    if (result.ok) return c.json({ ok: true });
+    return c.text(
+      result.reason === "wrong" ? "Wrong device key" : "Device key not configured",
+      result.reason === "wrong" ? 403 : 503,
+    );
+  });
+
   // Old server answered GET/HEAD only — except the POST routes above.
   app.use("*", async (c, next) => {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") {

@@ -9,8 +9,9 @@ defineProps<{
   flash: string | null;
   /** Server-formatted "HH:MM" of the tab's last successful fetch ("—" if none). */
   fetchedAt: string;
-  /** Server-authoritative lease lock; the toggle is the only control that
-   *  still works while locked (it opens the PIN pad, App owns the rest). */
+  /** Server-authoritative lease lock; while locked the data refresh hides
+   *  and the toggle becomes 解锁 — page reload stays available (it lands
+   *  right back on the locked clock page, so it cannot leak or unlock). */
   locked: boolean;
 }>();
 
@@ -25,17 +26,13 @@ const emit = defineEmits<{ "refresh-data": []; "reload-page": []; "toggle-lock":
       <span
         >更新于 <b>{{ fetchedAt }}</b></span
       >
-      <!-- While locked the two refresh buttons disappear entirely: a button
-           that lights up on tap but does nothing is a lie — only the unlock
-           toggle remains on screen. -->
-      <template v-if="locked">
-        <button @click="emit('toggle-lock')">解锁</button>
-      </template>
-      <template v-else>
-        <button @click="emit('refresh-data')">刷新数据</button>
-        <button @click="emit('reload-page')">刷新页面</button>
-        <button @click="emit('toggle-lock')">锁定</button>
-      </template>
+      <!-- While locked 刷新数据 disappears (its tabs redirect to the clock,
+           and a button that lights up on tap but does nothing is a lie) —
+           but 刷新页面 stays: a reload lands back on the locked clock page,
+           the safe recovery for a wedged page without touching the lease. -->
+      <button v-if="!locked" @click="emit('refresh-data')">刷新数据</button>
+      <button @click="emit('reload-page')">刷新页面</button>
+      <button @click="emit('toggle-lock')">{{ locked ? "解锁" : "锁定" }}</button>
     </div>
   </header>
 </template>

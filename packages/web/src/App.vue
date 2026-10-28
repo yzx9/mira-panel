@@ -58,15 +58,18 @@ watch(locked, (v) => {
   }
 });
 
-// While locked these two are silently ignored — the unlock pad is the only
-// control that still does anything.
+// While locked, data refresh is silently ignored — the unlock pad and the
+// page-reload button are the only controls that still do anything.
 function onRefreshData(): void {
   if (locked.value) return;
   refresh(true);
 }
 
+// Deliberately NOT gated on locked: the lease lives on the server and a
+// locked GET redirects to the clock page, so a reload just lands back on
+// the locked clock — safe recovery for a wedged page (ghosted e-paper, a
+// stuck socket) that neither leaks data nor disturbs the lock.
 function reloadPage(): void {
-  if (locked.value) return;
   location.reload();
 }
 

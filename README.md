@@ -127,10 +127,8 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
 ```
 
 - `Authorization: <完整 API key>` —— **不要加 `Bearer` 前缀，加了会鉴权失败**
-- 凭据来源：**面板自管 `.env` 优先**（`GLM_API_KEY` + `GLM_BASE_URL`，见「安全」节的
-  密钥管理）；未配置时回退到 nix 生成的 `claude-code-glm-settings.json` 链
-  （host 由 `ANTHROPIC_BASE_URL` 推导、key 由 `apiKeyHelper` 在服务端运行时解析，
-  无硬编码 store 路径 → 每次 nix rebuild 都不会失效）
+- 凭据来源：**面板自管 `.env`**（`GLM_API_KEY` + `GLM_BASE_URL`，见「安全」节的
+  密钥管理）；未配置时 GLM 请求直接报错
 - 额度项按 `type + unit + number` 识别，**不能按下标兜底**：
   - `TOKENS_LIMIT unit=3 number=5` → 5 小时池
   - `TOKENS_LIMIT unit=6 number=1` → 周池（部分账号不返回 → 隐藏该项）
@@ -432,9 +430,8 @@ curl 三态即可）。
 
 - 收录的键：`PANEL_PIN`、`PANEL_CONTROLLER_KEY`（主控设备钥，可选）、`VIKUNJA_API_KEY`、
   `DEEPSEEK_API_KEY`、`TAVILY_API_KEY`、
-  代理 `HTTPS_PROXY`/`ALL_PROXY`，以及可选的 GLM 对（`GLM_API_KEY` + `GLM_BASE_URL`）
-- GLM 对未配置时回退旧的 nix 生成链（`claude` wrapper → settings JSON →
-  `apiKeyHelper`），`.env` 填好即切换——迁移零风险
+  代理 `HTTPS_PROXY`/`ALL_PROXY`，以及可选的 GLM 对（`GLM_API_KEY` + `GLM_BASE_URL`；
+  未配置时 GLM 数据源报错，面板其余部分不受影响）
 - 值只在服务端内存中转：直达上游请求头或 PIN 比对，不落码、不写日志、不回发、
   不进 `/api/raw`；`leases.json` 只含设备名与到期时间戳
 - **`.env` 绝不进仓库**（已 git-ignore）；也不要把值内联进命令行/prompt——

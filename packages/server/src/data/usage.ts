@@ -1,11 +1,8 @@
 // GLM Coding Plan data layer (ported from the previous usage.mjs).
 //
-// Credentials: the panel's own store first — process.env / the repo-root
-// `.env` (GLM_API_KEY + GLM_BASE_URL, see secrets.ts). When either is
-// missing it falls back to the nix-managed chain the `claude` wrapper and
-// cc-keepalive use (wrapper binary -> generated settings JSON ->
-// `apiKeyHelper`), so the panel survives every nix rebuild / GC even
-// before `.env` is provisioned. Nothing is hardcoded.
+// Credentials: the panel's own store only — process.env / the repo-root
+// `.env` (GLM_API_KEY + GLM_BASE_URL, see secrets.ts). Nothing is
+// hardcoded.
 //
 // Endpoints (documented in zai-org/ZCode, docs/bigmodel-coding-plan-usage-quota.md):
 //   GET <host>/api/monitor/usage/quota/limit      no query params, API-key auth
@@ -24,21 +21,9 @@
 // calls quota and usage independently (the clock tab declares the quota walk
 // only, so the model/tool endpoints go completely uncalled there).
 
-import { execFile } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
-import { userInfo } from "node:os";
-import { promisify } from "node:util";
-
 import type { McpDetail, ModelUsage, ToolCall } from "@mira-panel/shared";
 
 import { panelSecret } from "../secrets.ts";
-
-const execFileAsync = promisify(execFile);
-
-// Per-user nix profile path — derived from the running user, never pinned
-// to one login name.
-const CLAUDE_WRAPPER = `/etc/profiles/per-user/${userInfo().username}/bin/claude`;
-const SETTINGS_RE = /\/nix\/store\/[^"'\s]*claude-code-glm-settings\.json/;
 
 const CRED_TTL_MS = 10 * 60 * 1000; // key/host rarely change
 const REQUEST_TIMEOUT_MS = 12 * 1000;
@@ -132,37 +117,16 @@ interface Credentials {
 
 let cred: Credentials | null = null;
 
-/** Resolve { host, key }: the panel's own .env first, then the nix-generated
- *  claude wrapper chain (which stays as the migration fallback). */
+/** Resolve { host, key } from the panel's own store (see secrets.ts). */
 async function credentials(): Promise<Credentials> {
   if (cred && Date.now() - cred.at < CRED_TTL_MS) return cred;
 
   const ownKey = await panelSecret("GLM_API_KEY");
   const ownBase = await panelSecret("GLM_BASE_URL");
-  if (ownKey && ownBase) {
-    cred = { at: Date.now(), base: ownBase, host: new URL(ownBase).origin, key: ownKey };
-    return cred;
+  if (!ownKey || !ownBase) {
+    throw new Error("no GLM credentials (env GLM_API_KEY + GLM_BASE_URL or .env)");
   }
-
-  const wrapper = await realpath(CLAUDE_WRAPPER);
-  const wrapperText = await readFile(wrapper, "utf8");
-  const settingsPath = wrapperText.match(SETTINGS_RE)?.[0];
-  if (!settingsPath) throw new Error(`no claude-code-glm-settings.json referenced by ${wrapper}`);
-
-  const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
-    env?: { ANTHROPIC_BASE_URL?: string };
-    apiKeyHelper?: string;
-  };
-  const helper = settings.apiKeyHelper;
-  if (!helper) throw new Error(`settings ${settingsPath} has no apiKeyHelper`);
-  const base = settings.env?.ANTHROPIC_BASE_URL;
-  if (!base) throw new Error(`settings ${settingsPath} has no ANTHROPIC_BASE_URL`);
-
-  const { stdout } = await execFileAsync(helper, [], { timeout: 10_000 });
-  const key = stdout.trim();
-  if (!key) throw new Error(`apiKeyHelper ${helper} returned an empty key`);
-
-  cred = { at: Date.now(), base, host: new URL(base).origin, key };
+  cred = { at: Date.now(), base: ownBase, host: new URL(ownBase).origin, key: ownKey };
   return cred;
 }
 

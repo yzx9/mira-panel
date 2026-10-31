@@ -24,7 +24,7 @@ export interface PageSlots {
 
 export function tabTitle(tab: TabId): string {
   if (tab === "vikunja") return "Mira Monitor · Vikunja";
-  if (tab === "glm") return "Mira Monitor · GLM 用量";
+  if (tab === "glm") return "Mira Monitor · LLM 用量";
   return "Mira Monitor · 时钟";
 }
 

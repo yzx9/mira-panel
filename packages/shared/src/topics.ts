@@ -9,6 +9,8 @@
 // payload is a few dozen bytes instead of the full slices.
 
 import type {
+  CodexState,
+  CodexWindow,
   DeepSeekState,
   Health,
   McpQuota,
@@ -24,6 +26,8 @@ export type TopicId =
   | "glm:quota" // 5-hour + weekly + MCP pools (one upstream quota call)
   | "glm:rail" // 5-hour pool only — the rail preview on other tabs
   | "glm:usage" // today's model/tool usage (GLM tab only)
+  | "codex:full" // subscription rate-limit windows (LLM tab card)
+  | "codex:rail" // weekly window only — the rail preview on other tabs
   | "vikunja:full" // counts + every bucket row (Vikunja tab)
   | "vikunja:counts" // counts only — the rail preview on other tabs
   | "deepseek" // balance card (GLM tab)
@@ -32,9 +36,9 @@ export type TopicId =
 /** What each tab declares on connect. Static for a page's lifetime — a tab
  *  switch is a full navigation, so the set never changes mid-connection. */
 export const TOPICS_FOR_TAB: Record<TabId, readonly TopicId[]> = {
-  clock: ["glm:rail", "vikunja:counts"],
-  glm: ["glm:quota", "glm:usage", "vikunja:counts", "deepseek", "tavily"],
-  vikunja: ["glm:rail", "vikunja:full"],
+  clock: ["glm:rail", "codex:rail", "vikunja:counts"],
+  glm: ["glm:quota", "glm:usage", "codex:full", "vikunja:counts", "deepseek", "tavily"],
+  vikunja: ["glm:rail", "codex:rail", "vikunja:full"],
 };
 
 // ------------------------------------------------------------ payloads
@@ -55,6 +59,11 @@ export interface GlmUsagePayload extends Health {
   usage: UsageSummary | null;
 }
 
+export interface CodexRailPayload extends Health {
+  /** The weekly window only — the rail's second readout. */
+  secondary: CodexWindow | null;
+}
+
 export interface VikunjaCountsPayload extends Health {
   counts: VikunjaCounts | null;
   truncated: boolean;
@@ -65,6 +74,8 @@ export interface TopicPayloadMap {
   "glm:quota": GlmQuotaPayload;
   "glm:rail": GlmRailPayload;
   "glm:usage": GlmUsagePayload;
+  "codex:full": CodexState;
+  "codex:rail": CodexRailPayload;
   "vikunja:full": VikunjaState;
   "vikunja:counts": VikunjaCountsPayload;
   deepseek: DeepSeekState;

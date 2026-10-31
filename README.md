@@ -62,9 +62,10 @@ rail  │  detail（当前 tab 的完整内容）
       │
  时钟 │  /        大号 HH:MM（分钟走动）+ 日期墙（日期 · 星期 · 年份）
 ──────│
- GLM  │  /glm     5 小时额度（大号「已用」%）、MCP 月额度 + 分项、
- 用量 │            今天模型用量（含工具调用行）、DeepSeek 余额、
-      │            Tavily 积分、周额度（账号有则显示）
+ LLM  │  /glm     GLM 汇总卡（5 小时已用 + 本周已用；重置时间常显；今日 Token
+ 用量 │            与 MCP 本月两个紧凑计数，旁边按钮打开明细弹窗）、
+      │            OpenAI·Codex 卡（本周已用 + 5 小时已用，重置、credits、更新时间常显）、
+      │            DeepSeek 余额、Tavily 积分
 ──────│
 Vikunja│ /vikunja 汇总条（六等分白底格、格间一条竖线：未完成 / 今日 / 未来 7 天 / 逾期 / 无截止 / 以后）、
       │          全量任务列表（按桶分组，块右缘 ▲/▼ 翻页，不滚动）
@@ -74,8 +75,12 @@ Vikunja│ /vikunja 汇总条（六等分白底格、格间一条竖线：未完
 README，出现在电子纸上就是噪声。
 
 - **tab 是普通链接**（`/`、`/glm`、`/vikunja`）：切换 = 一次 SSR 请求，无前端路由、无 vue-router
-- **rail 里的预览刻意极简**：时钟只显示当前时间，GLM 只显示 5 小时额度，Vikunja 只显示
-  今日 + 逾期 + 未完成
+- **rail 里的预览刻意极简**：时钟只显示当前时间，LLM 标题下两列并排显示 GLM 5 小时、
+  OpenAI 本周的**已用百分比**，厂商名加粗、窗口名常规字重且同一行；Vikunja 只显示今日 + 逾期 + 未完成
+- **LLM 页固定一屏，不上下滚动**：不再使用行内折叠。今日 Token、MCP 的明细按钮打开
+  白底弹窗（每页 8 行，翻页零请求），支持关闭、Esc、点击空白处关闭，焦点限制在弹窗内、
+  关闭后回到原按钮。弹窗位于缩放画布内，不改变底层布局；无 JavaScript 时摘要、重置与
+  更新时间仍直接可读，明细弹窗需要 JavaScript
 - **选中态 = 整块反色**（黑底白字），一位信号、零动画
 
 ## 架构要点
@@ -101,7 +106,7 @@ README，出现在电子纸上就是噪声。
 | 路径                          | 作用                                                                                                                                                                                                                               |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/`、`/clock`、`/index.html`  | 时钟页（SSR，首页，bootstrap 只嵌 rail 所需的瘦切片）                                                                                                                                                                              |
-| `/glm`                        | GLM 面板（SSR，bootstrap 含 quota/usage/deepseek/tavily）                                                                                                                                                                          |
+| `/glm`                        | LLM 面板（SSR，bootstrap 含 GLM quota/usage、Codex、DeepSeek、Tavily）                                                                                                                                                             |
 | `/vikunja`                    | Vikunja 面板（SSR，bootstrap 含全量任务桶）                                                                                                                                                                                        |
 | `/ws`                         | **稳态数据通道**（WebSocket，见「刷新契约」）：页面声明当前 tab 的 topic，hub 按各源自有节奏推送；锁/解锁转移也在这条通道广播                                                                                                      |
 | `/api/raw`                    | hub 里每个源的缓存状态（ok/stale/error/原始 payload）+ 客户端视口（调试用）                                                                                                                                                        |
@@ -133,10 +138,30 @@ GET <host>/api/monitor/usage/tool-usage?startTime=&endTime=
   - `TOKENS_LIMIT unit=3 number=5` → 5 小时池
   - `TOKENS_LIMIT unit=6 number=1` → 周池（部分账号不返回 → 隐藏该项）
   - `TIME_LIMIT unit=5 number=1` → MCP / 工具月额度
-- `percentage` 是**已用**百分比；界面展示剩余时用 `100 - percentage`
+- `percentage` 是**已用**百分比；LLM 主卡、进度条与左侧概览统一直接显示已用
 - 时间窗 = **今天 00:00:00 → 23:59:59**（不是滚动 24 小时）。已验证 `totalUsage`
   完全按请求窗口统计，所以"今天"的数字是当天真实累计。
 - 逐小时的 `tokensUsage` / `x_time` 仍保留在 `/api/raw` 里（将来若做趋势图直接用）
+
+### Codex 订阅额度（`/glm` 的 OpenAI 卡）
+
+```
+codex app-server --stdio        # JSON-RPC：initialize → initialized
+  → account/rateLimits/read     # 无模型消息，纯额度读取
+```
+
+- 凭据**不经过面板**：Codex CLI 自己的登录态（面板主机上的 `~/.codex`）提供认证，
+  本源只 spawn `codex app-server` 做一次 stdio 往返；`.env` 里可选 `CODEX_BIN`
+  覆盖可执行文件（默认 PATH 里的 `codex`）
+- 窗口按**时长**识别（`windowDurationMins`：300 → 5 小时、10080 → 本周），不按
+  primary/secondary 槽位名兜底；未知时长保留原值、由界面如实标注
+- `usedPercent` 是已用；`resetsAt` 是**秒**，入站统一转毫秒；坏百分比钳到 0-100
+- `credits` 余额与免费重置次数（`rateLimitResetCredits`）只展示，**面板不提供
+  消耗入口**；它们与订阅窗口百分比不混算
+- 这是 ChatGPT 订阅的 rate-limit 面，**不是** OpenAI platform 的美元余额（那个
+  没有官方查询接口）
+- `/api/raw` 里的原始副本已剥离 `accountId`（原始转储只留结构，不带身份）
+- 每次取数 spawn 一个新进程（节奏 5 分钟，开销可忽略），无守护进程可泄漏
 
 ### Vikunja（`/vikunja`）
 
@@ -215,8 +240,8 @@ GET https://api.tavily.com/usage
 ## 刷新契约（声明式订阅，电子纸友好）
 
 - **首屏**：服务端渲染真实数字，**没有 JavaScript 也能读且带样式**。bootstrap 按 tab
-  瘦身：时钟页只嵌 GLM 5 小时池 + Vikunja 计数（≈0.5 KB），Vikunja 全量桶只有
-  `/vikunja` 页才嵌入——旧版「每页整面板 JSON」的几十 KB 没了
+  瘦身：时钟页只嵌 GLM 5 小时池 + OpenAI 周窗口 + Vikunja 计数（≈0.5 KB），
+  Vikunja 全量桶只有 `/vikunja` 页才嵌入——旧版「每页整面板 JSON」的几十 KB 没了
 - **稳态 = WebSocket 声明订阅**：页面挂载后连 `/ws`，发送
   `{"type":"subscribe","tab":…,"vw":…,"vh":…,"dpr":…}`；服务端 hub 把
   topic 映射到上游取数单元（source），**只有被声明的 source 才有定时器**——深夜
@@ -226,11 +251,11 @@ GET https://api.tavily.com/usage
   永不为数据等：页面从缓存快照起步，新鲜数字随后按节奏以普通 update 到达）
 - **topic 粒度刻意细**（`packages/shared/src/topics.ts` 的 `TOPICS_FOR_TAB`）：
 
-  | tab     | 声明的 topic                                                     |
-  | ------- | ---------------------------------------------------------------- |
-  | 时钟    | `glm:rail`（仅 5 小时池）、`vikunja:counts`（仅计数）            |
-  | GLM     | `glm:quota`、`glm:usage`、`vikunja:counts`、`deepseek`、`tavily` |
-  | Vikunja | `glm:rail`、`vikunja:full`（全量桶，只有这个页面收到）           |
+  | tab     | 声明的 topic                                                                    |
+  | ------- | ------------------------------------------------------------------------------- |
+  | 时钟    | `glm:rail`（仅 5 小时池）、`codex:rail`（仅周窗口）、`vikunja:counts`（仅计数） |
+  | GLM     | `glm:quota`、`glm:usage`、`codex:full`、`vikunja:counts`、`deepseek`、`tavily`  |
+  | Vikunja | `glm:rail`、`codex:rail`、`vikunja:full`（全量桶，只有这个页面收到）            |
 
 - **服务端节奏**（hub.ts 的 `createPanelHub`，锁定态取 locked 列；锁定是**全局**的，
   所有连接一起换档）：
@@ -238,6 +263,7 @@ GET https://api.tavily.com/usage
   | source                          | 活跃节奏    | 锁定节奏 | 上游下限（floor） |
   | ------------------------------- | ----------- | -------- | ----------------- |
   | glm-quota / glm-usage / vikunja | 60 秒       | 10 分钟  | = 节奏            |
+  | codex                           | **5 分钟**  | 15 分钟  | **1 分钟**        |
   | deepseek                        | **30 分钟** | 30 分钟  | **5 分钟**        |
   | tavily                          | **30 分钟** | 30 分钟  | = 节奏            |
 
@@ -408,7 +434,20 @@ chromium --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
   --screenshot=/tmp/shot.png http://127.0.0.1:15932/glm
 ```
 
-验收要点：截图与旧版逐字节一致（同等数据下）；浏览器控制台零水合告警；
+LLM 布局与弹窗另有**离线浏览器验收**，只用合成状态和 mock WebSocket，不启动服务、不读取凭据：
+
+```bash
+npm run build
+# 使用 Nix 环境里现有的 Playwright / Chromium；不需要安装 npm 包
+PLAYWRIGHT_MODULE='<Playwright index.mjs 的绝对路径>' \
+CHROMIUM_BIN='<Chromium 可执行文件绝对路径>' \
+ARTIFACT_DIR="$TMPDIR/mira-llm-layout" node scripts/check-llm-layout.mjs
+```
+
+覆盖三页左栏、2200×1650／半尺寸／宽屏缩放、0/100% 与缺失/过期数据、
+明细打开/关闭/分页/焦点返回、无 JS 首屏及零水合告警，并断言主区和弹窗无滚动溢出。
+
+验收要点：截图符合目标布局、没有非预期变化；浏览器控制台零水合告警；
 `curl -s /glm | grep 亿` 无 JS 也能读到真实数字；`curl -I` 200 无 body、
 `curl -X POST` 405（**例外是四条写路径**：勾选完成 `/api/vikunja/tasks/:id/done`、
 `/api/lock`、`/api/unlock`、`/api/presence`——都要求 `X-Panel-Write: 1`（缺头 400），勾选路径在

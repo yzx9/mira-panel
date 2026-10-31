@@ -42,6 +42,7 @@ function defs(counter: Counter, bodies: Bodies = {}, intervalMs = 15, lockedInte
   return {
     "glm-quota": def("glm-quota"),
     "glm-usage": def("glm-usage"),
+    codex: def("codex"),
     vikunja: def("vikunja"),
     deepseek: def("deepseek"),
     tavily: def("tavily"),
@@ -96,6 +97,14 @@ test("subscribe answers hello, then pushes the declared topics only", async () =
         weekly: { pct: 40, remainPct: 60, bar: 40, resetMs: null },
         mcp: null,
       }),
+      codex: () => ({
+        planType: "plus",
+        primary: { usedPct: 14, windowMins: 300, resetMs: 1793347633000 },
+        secondary: { usedPct: 25, windowMins: 10080, resetMs: 1793778340000 },
+        creditsBalance: "0",
+        resetCredits: 1,
+        api: null,
+      }),
     }),
   );
   const conn = fakeConn();
@@ -106,8 +115,10 @@ test("subscribe answers hello, then pushes the declared topics only", async () =
   const hello = conn.sent.find((m) => m.type === "hello");
   assert.ok(hello && hello.type === "hello" && hello.build === "b1");
 
-  // Clock declares glm:rail + vikunja:counts — never glm:usage, deepseek, tavily.
+  // Clock declares glm:rail + codex:rail + vikunja:counts — never glm:usage,
+  // codex:full, deepseek, tavily.
   assert.deepEqual([...new Set(updatesOf(conn).map((m) => m.topic))].sort(), [
+    "codex:rail",
     "glm:rail",
     "vikunja:counts",
   ]);
@@ -123,6 +134,18 @@ test("subscribe answers hello, then pushes the declared topics only", async () =
     fiveHour: { pct: 7, resetMs: 1234 },
   });
   assert.ok(rail.data.fetchedAt !== "—");
+
+  // The codex rail slice carries the weekly window only — no plan, credits
+  // or 5-hour fields ride along to the other tabs.
+  const codexRail = updatesOf(conn).find((m) => m.topic === "codex:rail");
+  assert.ok(codexRail);
+  assert.deepEqual(codexRail.data, {
+    ok: true,
+    stale: false,
+    error: null,
+    fetchedAt: codexRail.data.fetchedAt,
+    secondary: { usedPct: 25, windowMins: 10080, resetMs: 1793778340000 },
+  });
 
   // The usage endpoints never ran — clock does not declare them.
   handle.close();
@@ -363,10 +386,12 @@ test("hello carries the locked level so a reconnecting page self-corrects", asyn
 
 test("an upstream floor absorbs refresh bursts without re-fetching", async () => {
   const counter: Counter = { fetches: 0 };
-  // interval 15ms but a 300ms upstream floor on both declared sources:
-  // bursts inside the floor must serve cache, the one after it may fetch.
+  // interval 15ms but a 300ms upstream floor on the declared sources
+  // (vikunja tab = glm:rail + codex:rail + vikunja:full): bursts inside the
+  // floor must serve cache, the one after it may fetch.
   const made = defs(counter, {}, 15);
   made["glm-quota"].floorMs = 300;
+  made.codex.floorMs = 300;
   made.vikunja.floorMs = 300;
   const hub = createHub("b1", made);
   const conn = fakeConn();

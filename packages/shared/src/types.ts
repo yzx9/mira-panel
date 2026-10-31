@@ -12,6 +12,7 @@ export interface PanelState {
    *  countdowns are pure functions of (resetMs, now) so hydration agrees. */
   now: number;
   glm: GlmState;
+  codex: CodexState;
   vikunja: VikunjaState;
   deepseek: DeepSeekState;
   tavily: TavilyState;
@@ -70,6 +71,35 @@ export interface GlmState extends Health {
   weekly: QuotaPool | null;
   mcp: McpQuota | null;
   usage: UsageSummary | null;
+}
+
+/** One Codex (ChatGPT subscription) rate-limit window. The API reports
+ *  usage; the UI derives remaining = 100 - usedPct. */
+export interface CodexWindow {
+  /** Percentage USED inside the window, clamped to 0-100. */
+  usedPct: number;
+  /** Window length in minutes: 300 = 5-hour, 10080 = weekly. Carried so an
+   *  unexpected window labels itself instead of being passed off as 5h. */
+  windowMins: number;
+  /** Epoch ms of the next reset, null when the API did not say. */
+  resetMs: number | null;
+}
+
+/** Codex subscription quota snapshot (server-normalized). This is the
+ *  subscription's rate-limit surface, NOT the OpenAI platform USD balance —
+ *  the two never mix on this panel. */
+export interface CodexState extends Health {
+  /** Plan slug as reported ("plus" / "pro" / …); null when absent. */
+  planType: string | null;
+  /** 5-hour window; null when the response carried none. */
+  primary: CodexWindow | null;
+  /** Weekly (10080-minute) window; null when the response carried none. */
+  secondary: CodexWindow | null;
+  /** Prepaid Codex credits balance, verbatim string as reported. */
+  creditsBalance: string | null;
+  /** Available rate-limit reset credits (free full resets). Display-only —
+   *  the panel never consumes them. */
+  resetCredits: number | null;
 }
 
 /** One visible task row. `when` is the server-formatted due label

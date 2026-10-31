@@ -29,6 +29,7 @@ import {
 } from "@mira-panel/shared";
 
 import { fetchDeepSeekBalance } from "./data/deepseek.ts";
+import { fetchCodexLimits, type CodexBody } from "./data/codex.ts";
 import { fetchTavilyUsage } from "./data/tavily.ts";
 import { fetchGlmQuota, fetchGlmUsage, type GlmQuotaBody, type UsageRaw } from "./data/usage.ts";
 import { fetchTasks, type TaskRaw, type VikunjaBody } from "./data/vikunja.ts";
@@ -37,7 +38,7 @@ import { noteClientViewportValues } from "./viewport.ts";
 
 /** Upstream fetch unit. Several topics can share one source (glm:quota and
  *  glm:rail read the same quota endpoint; only the projection differs). */
-export type SourceName = "glm-quota" | "glm-usage" | "vikunja" | "deepseek" | "tavily";
+export type SourceName = "glm-quota" | "glm-usage" | "codex" | "vikunja" | "deepseek" | "tavily";
 
 export interface SourceDef<T> {
   /** Refresh cadence while the panel is unlocked. */
@@ -69,6 +70,8 @@ const TOPIC_SOURCE: Record<TopicId, SourceName> = {
   "glm:quota": "glm-quota",
   "glm:rail": "glm-quota",
   "glm:usage": "glm-usage",
+  "codex:full": "codex",
+  "codex:rail": "codex",
   "vikunja:full": "vikunja",
   "vikunja:counts": "vikunja",
   deepseek: "deepseek",
@@ -121,6 +124,22 @@ function projectImpl(topic: TopicId, s: AnySourceState): TopicPayloadMap[TopicId
       return {
         ...health,
         usage: u ? { calls: u.calls, tokens: u.tokens, models: u.models, tools: u.tools } : null,
+      };
+    }
+    case "codex:rail": {
+      const c = (s.payload ?? {}) as Partial<CodexBody>;
+      return { ...health, secondary: c.secondary ?? null };
+    }
+    case "codex:full": {
+      const c = (s.payload ?? {}) as Partial<CodexBody>;
+      // api (the raw dump copy) stays off the wire, like every raw-only field.
+      return {
+        ...health,
+        planType: c.planType ?? null,
+        primary: c.primary ?? null,
+        secondary: c.secondary ?? null,
+        creditsBalance: c.creditsBalance ?? null,
+        resetCredits: c.resetCredits ?? null,
       };
     }
     case "vikunja:counts": {
@@ -452,7 +471,10 @@ const MIN = 60_000;
  *   glm-quota / glm-usage / vikunja — 60s, 10min while locked
  *   deepseek / tavily — 30min (a balance and a monthly credit pool are slow);
  *   deepseek also carries a 5min upstream floor — the API allows one query
- *   per 5 minutes, so no burst path may re-ask it sooner */
+ *   per 5 minutes, so no burst path may re-ask it sooner
+ *   codex — 5min / 15min locked: the rate-limit windows roll slowly and each
+ *   fetch spawns one stdio app-server round; the 1min floor keeps refresh
+ *   bursts from respawning the CLI process back-to-back */
 export function createPanelHub(build: string, lockView?: LockView): Hub {
   return createHub(
     build,
@@ -469,6 +491,20 @@ export function createPanelHub(build: string, lockView?: LockView): Hub {
         // null body = never fetched: the usage card hides, never zeroes.
         fetch: fetchGlmUsage,
         empty: () => null,
+      },
+      codex: {
+        intervalMs: 5 * MIN,
+        lockedIntervalMs: 15 * MIN,
+        floorMs: MIN,
+        fetch: fetchCodexLimits,
+        empty: () => ({
+          planType: null,
+          primary: null,
+          secondary: null,
+          creditsBalance: null,
+          resetCredits: null,
+          api: null,
+        }),
       },
       vikunja: {
         intervalMs: MIN,

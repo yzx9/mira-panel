@@ -9,7 +9,7 @@
 // no longer waits for (or carries) the Vikunja buckets, the DeepSeek
 // balance or the Tavily credits.
 
-import type { GlmState, PanelState, TabId, VikunjaState } from "@mira-panel/shared";
+import type { CodexState, GlmState, PanelState, TabId, VikunjaState } from "@mira-panel/shared";
 
 import { payloadFor, type AnySourceState, type Hub, type SourceName } from "./hub.ts";
 
@@ -42,6 +42,21 @@ function glmSlice(tab: TabId, quota: AnySourceState, usage: AnySourceState): Glm
   return { ...pools, usage: used.usage } as GlmState;
 }
 
+function codexSlice(tab: TabId, c: AnySourceState): CodexState {
+  if (tab !== "glm") {
+    // Rail-only: the weekly window; the card-only fields stay null off-tab.
+    const rail = payloadFor("codex:rail", c);
+    return {
+      ...rail,
+      planType: null,
+      primary: null,
+      creditsBalance: null,
+      resetCredits: null,
+    } as CodexState;
+  }
+  return payloadFor("codex:full", c) as CodexState;
+}
+
 /** Assemble a tab's bootstrap: the sources its topics need are read through
  *  the hub (fresh within the interval, fetched otherwise — deduped with any
  *  in-flight round); the rest embeds the last-known state when there is
@@ -50,6 +65,7 @@ function glmSlice(tab: TabId, quota: AnySourceState, usage: AnySourceState): Glm
 export async function stateFor(hub: Hub, tab: TabId, build: string): Promise<PanelState> {
   const reads: Partial<Record<SourceName, Promise<AnySourceState>>> = {
     "glm-quota": hub.get("glm-quota"),
+    codex: hub.get("codex"), // every tab's rail carries the OpenAI weekly readout
     vikunja: hub.get("vikunja"),
   };
   if (tab === "glm") {
@@ -69,6 +85,7 @@ export async function stateFor(hub: Hub, tab: TabId, build: string): Promise<Pan
     build,
     now: Date.now(),
     glm: glmSlice(tab, s["glm-quota"]!, s["glm-usage"] ?? NEVER),
+    codex: codexSlice(tab, s.codex!),
     vikunja: payloadFor(vkTopic, s.vikunja!) as VikunjaState,
     deepseek: payloadFor(
       "deepseek",

@@ -61,6 +61,14 @@ export function resetInText(resetMs: number | null, now: number): string {
   return `${fmtCountdown(resetMs - now)} 后重置`;
 }
 
+/** Codex window label by duration, so an unexpected window names itself:
+ *  300 -> "5 小时", 10080 -> "本周", anything else -> its literal minutes. */
+export function codexWindowLabel(windowMins: number): string {
+  if (windowMins === 300) return "5 小时";
+  if (windowMins === 10080) return "本周";
+  return Number.isFinite(windowMins) ? `${windowMins} 分钟` : "未知窗口";
+}
+
 const WEEKDAYS = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
 
 /** Date-wall label: "10月15日". */

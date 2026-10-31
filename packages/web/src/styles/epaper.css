@@ -134,6 +134,54 @@ h1 {
   font-weight: 900;
   line-height: 1;
 }
+/* Two equal columns, with each provider's window directly under its name. */
+.llm-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 6px;
+}
+.llm-preview-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.llm-preview-column + .llm-preview-column {
+  border-left: 3px solid currentColor;
+  padding-left: 20px;
+}
+.llm-preview-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+.llm-preview-name {
+  font-size: 30px;
+  font-weight: 900;
+}
+.llm-preview-window {
+  font-size: 24px;
+  font-weight: 400;
+}
+.llm-preview-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.llm-preview-value b {
+  font-size: 76px;
+  font-weight: 900;
+  line-height: 1.4;
+}
+.llm-preview-value > span {
+  font-size: 24px;
+}
+.llm-preview-status {
+  font-size: 22px;
+}
 .tab-preview .unit {
   font-size: 30px;
   font-weight: 400;
@@ -161,6 +209,12 @@ main {
 }
 main::-webkit-scrollbar {
   display: none;
+}
+/* LLM is a three-row glance page. Breakdowns use paginated dialogs, never
+   expand these tracks or enable the main area's scrolling fallback. */
+main.llm-main {
+  grid-template-rows: repeat(3, 1fr);
+  overflow: clip;
 }
 
 /* White cells on the black lattice. No overflow:hidden still: a card that
@@ -271,6 +325,166 @@ h2 {
   height: 100%;
   min-height: 26px;
   background: #000;
+}
+
+/* ------------------------------------------------------ quota summaries */
+.llm-card {
+  gap: 16px;
+}
+.llm-card .hero-row {
+  min-height: 146px;
+}
+.llm-reset {
+  align-self: center;
+}
+.quota-reset-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.quota-reset-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.quota-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 30px;
+  font-size: 24px;
+  margin-top: auto;
+}
+.quota-updated {
+  margin-left: auto;
+}
+/* The counters have inline detail buttons, not extra disclosure rows. */
+.duo-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.duo-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.duo-label {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 26px;
+}
+.duo-num {
+  font-size: 54px;
+  font-weight: 900;
+  line-height: 1;
+}
+.duo-num .duo-sub {
+  font-size: 26px;
+  font-weight: 400;
+}
+button.detail-button {
+  min-height: 44px;
+  padding: 4px 14px;
+  border-width: 3px;
+  font-size: 22px;
+  letter-spacing: 1px;
+}
+
+/* Opaque paper overlay in the scaled canvas, just like the PIN pad. Only
+   the dialog carries a frame; no dimming or extra surrounding frame. */
+.usage-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: #fff;
+}
+.usage-dialog {
+  width: 1500px;
+  height: 1220px;
+  padding: 32px 40px;
+  border: 5px solid #000;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.usage-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.usage-dialog-heading h2 {
+  font-size: 40px;
+}
+.usage-dialog-summary,
+.usage-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  font-size: 28px;
+}
+.usage-dialog-summary {
+  min-height: 70px;
+}
+.usage-dialog-summary b {
+  font-size: 44px;
+}
+.usage-dialog-content {
+  flex: 1;
+}
+.usage-dialog-table {
+  table-layout: fixed;
+}
+.usage-dialog-table th {
+  text-align: left;
+  padding: 10px 0;
+  font-size: 24px;
+}
+.usage-dialog-table th:first-child {
+  width: 62%;
+}
+.usage-dialog-table th:last-child {
+  width: 22%;
+}
+.usage-dialog-table th.num {
+  text-align: right;
+}
+.usage-dialog-table td {
+  height: 90px;
+  vertical-align: middle;
+  padding: 10px 0;
+}
+.usage-row-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  padding-right: 20px;
+}
+.usage-dialog-footer {
+  min-height: 76px;
+}
+.usage-dialog-pager {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.usage-dialog-pager button,
+.usage-page-pad {
+  width: 180px;
+  min-height: 70px;
+}
+.usage-dialog :focus-visible,
+.detail-button:focus-visible {
+  outline: none;
+  background: #000;
+  color: #fff;
 }
 
 table.rows {

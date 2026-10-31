@@ -9,6 +9,8 @@ import PinPad from "./components/PinPad.vue";
 import TabRail from "./components/TabRail.vue";
 import ClockDetail from "./components/clock/ClockDetail.vue";
 import GlmDetail from "./components/glm/GlmDetail.vue";
+import UsageDetailsDialog from "./components/glm/UsageDetailsDialog.vue";
+import type { UsageDetailKind } from "./components/glm/usageDetails.ts";
 import VikunjaDetail from "./components/vikunja/VikunjaDetail.vue";
 import { useClock } from "./composables/useClock";
 import { useLock } from "./composables/useLock";
@@ -31,17 +33,23 @@ const { state, flash, refresh } = usePanelState(props.initial, props.tab, (v) =>
 });
 
 // Header freshness stamp: the active tab's fetch time; the clock tab speaks
-// for both sources, so it shows whichever fetched later ("—" = never).
+// for both rail sources, so it shows whichever fetched later ("—" = never).
+const laterOf = (a: string, b: string): string => {
+  if (a === "—") return b;
+  if (b === "—") return a;
+  return a >= b ? a : b;
+};
 const fetchedAt = computed(() => {
-  const glm = state.value.glm.fetchedAt;
+  const glm = laterOf(state.value.glm.fetchedAt, state.value.codex.fetchedAt);
   const vk = state.value.vikunja.fetchedAt;
-  if (props.tab === "clock") {
-    if (glm === "—") return vk;
-    if (vk === "—") return glm;
-    return glm >= vk ? glm : vk;
-  }
+  if (props.tab === "clock") return laterOf(glm, vk);
   return props.tab === "vikunja" ? vk : glm;
 });
+
+const usageDetail = ref<UsageDetailKind | null>(null);
+function showUsageDetail(kind: UsageDetailKind): void {
+  if (!locked.value) usageDetail.value = kind;
+}
 
 // Every lock transition, whatever its origin, funnels through here: locking
 // remembers the data tab we leave and collapses to the clock page; unlocking
@@ -49,6 +57,7 @@ const fetchedAt = computed(() => {
 // to the remembered tab when there is one.
 watch(locked, (v) => {
   if (v) {
+    usageDetail.value = null;
     rememberTab();
     if (props.tab !== "clock") location.assign("/");
   } else {
@@ -156,23 +165,32 @@ async function onTaskDone(task: TaskRow): Promise<void> {
     @toggle-lock="onToggleLock"
   />
   <PinPad v-if="pinPad" @submit="onPinSubmit" @cancel="pinPad = false" />
+  <UsageDetailsDialog
+    v-if="usageDetail && !locked"
+    :kind="usageDetail"
+    :glm="state.glm"
+    :now="state.now"
+    @close="usageDetail = null"
+  />
   <div class="body">
     <TabRail
       :tab="tab"
       :glm="state.glm"
+      :codex="state.codex"
       :vikunja="state.vikunja"
-      :now="state.now"
       :clock-now="clockNow"
       :locked="locked"
     />
-    <main>
+    <main :class="{ 'llm-main': tab === 'glm' }">
       <ClockDetail v-if="tab === 'clock'" :clock-now="clockNow" />
       <GlmDetail
         v-else-if="tab === 'glm'"
         :glm="state.glm"
+        :codex="state.codex"
         :now="state.now"
         :deepseek="state.deepseek"
         :tavily="state.tavily"
+        @details="showUsageDetail"
       />
       <VikunjaDetail
         v-else

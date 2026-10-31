@@ -59,6 +59,14 @@ function applyUpdate(s: PanelState, msg: UpdateMsg): PanelState {
       const p = msg.data as TopicPayloadMap["glm:usage"];
       return { ...s, now, glm: { ...s.glm, ...health(p), usage: p.usage } };
     }
+    case "codex:rail": {
+      const p = msg.data as TopicPayloadMap["codex:rail"];
+      return { ...s, now, codex: { ...s.codex, ...health(p), secondary: p.secondary } };
+    }
+    case "codex:full": {
+      const p = msg.data as TopicPayloadMap["codex:full"];
+      return { ...s, now, codex: { ...p } };
+    }
     case "vikunja:counts": {
       const p = msg.data as TopicPayloadMap["vikunja:counts"];
       return {
@@ -104,8 +112,10 @@ export function usePanelState(initial: PanelState, tab: TabId, onLocked?: (v: bo
   let disposed = false;
 
   function activeStale(s: PanelState): boolean {
-    if (tab === "clock") return s.glm.stale || s.vikunja.stale;
-    return tab === "vikunja" ? s.vikunja.stale : s.glm.stale;
+    // The codex rail readout ships on every tab, so its staleness counts
+    // everywhere the way glm's rail slice already did on clock/vikunja.
+    if (tab === "clock") return s.glm.stale || s.vikunja.stale || s.codex.stale;
+    return tab === "vikunja" ? s.vikunja.stale || s.codex.stale : s.glm.stale || s.codex.stale;
   }
 
   function send(msg: unknown): void {
